@@ -1,0 +1,45 @@
+# Applicazioni, funzioni e sessioni
+
+## Modello
+
+- **Applicazione**: il prodotto software e la sua lista di funzioni. Una sola matrice condivisa dalle sue installazioni.
+- **Installazione**: una copia dell’app per un cliente, dominio ed eventuale percorso. Identificativo, collegamenti agli utenti locali e WhatsApp appartengono all’installazione.
+- **WordPress**: un tipo di integrazione dell’installazione. La scheda Siti WordPress è una vista filtrata, senza duplicare app e dati.
+- **Permesso**: una funzione esposta dall’app. L’admin concede quelle funzioni attraverso licenza, abilitazioni e ruoli; non inventa un catalogo parallelo.
+
+## Login del cliente nell’app
+
+Il cliente apre l’app, esegue SSO e ritorna al callback della stessa app. Non accede al pannello amministrativo Connect. A ogni login `ConnectBrowser.init()` verifica la sessione e legge `/v1/access`: installazione, identità, appartenenza al cliente, collegamento locale esplicito, licenza e scadenza, funzioni acquistate/abilitate e ruoli. Il risultato contiene `canLogin`, motivazione, utente locale e lista `functions`. L’app adatta l’interfaccia e controlla nuovamente il permesso sul backend prima di ogni operazione protetta.
+
+La sincronizzazione della matrice è indipendente dal login. Connect legge l’ultima matrice valida dal database; una fonte momentaneamente irraggiungibile non cancella le abilitazioni. `functionsStatus` distingue `ready`, `last_valid` e `pending`. Senza una prima matrice il cliente autorizzato entra comunque nell’app con le funzioni in preparazione. Nessuna funzione sconosciuta è concessa. Revoche effettive, licenze sospese e identità non autorizzate continuano a negare l’accesso. Un’indisponibilità del servizio di autenticazione non viene trasformata in un’autorizzazione.
+
+## Matrice fornita dall’app
+
+URL predefinito web: `https://app.example/.well-known/eulab-connect.json`, preceduto dall’eventuale percorso dell’installazione. WordPress espone `<home_url>/index.php?eulab_catalog=1`. L’URL viene impostato automaticamente creando l’installazione; l’admin può modificarlo nella finestra **Funzioni**, entro il dominio/percorso di un’installazione abilitata dell’app.
+
+```json
+{"schemaVersion":1,"appId":"mia-app","version":1,"functions":[
+  {"key":"users.read","name":"Leggi utenze collegate"},
+  {"key":"whatsapp.read","name":"Leggi conversazioni"},
+  {"key":"whatsapp.send","name":"Invia messaggi"},
+  {"key":"whatsapp.manage","name":"Gestisci connessione"}
+]}
+```
+
+L’SDK genera la matrice con `defineFunctions` e la risposta con `functionsResponse`; il framework ospitante monta il GET. `ConnectServer.registerFunctions()` registra solo l’URL: Connect effettua il GET, non accetta la matrice inviata dal chiamante. WordPress genera la matrice automaticamente, estendibile con il filtro `eulab_connect_functions`; incrementare `EULAB_CONNECT_FUNCTIONS_VERSION` a ogni modifica. Il timer Connect controlla le fonti circa ogni minuto (massimo 20 app per scansione); **Rileggi funzioni** richiede un tentativo immediato.
+
+GET limitato a JSON, 1 MiB e 5 secondi, senza redirect né credenziali. In produzione HTTPS pubblico; in collaudo locale solo origini mappate esplicitamente con `CATALOG_INTERNAL_ORIGINS_JSON`. Non esporre segreti nella matrice. Modifiche con uguale versione e versioni retrograde sono rifiutate, preservando l’ultima copia valida. La rimozione ritira la funzione e revoca assegnazioni/abilitazioni; la reintroduzione non le ripristina automaticamente. Le precedenti abilitazioni commerciali a gruppi vengono conservate per le esatte funzioni già dichiarate durante la migrazione al modello unico.
+
+## Utenze e WhatsApp
+
+`/v1/users` espone solo utenze abilitate, appartenenti al cliente e collegate esplicitamente all’installazione. Richiede `users.read`. Nessuna password, elenco globale o segreto. `permissions()` restituisce il contesto; `can(key)` guida la UI; `watchAccess()` aggiorna periodicamente; `requireFunction(token,key)` protegge le operazioni server. I metodi `whatsapp()` richiedono i rispettivi permessi a ogni operazione.
+
+WordPress non crea utenti. Il login SSO cliente apre l’utente locale collegato e torna al sito. L’accesso amministrativo “Accedi come” richiede una selezione dall’elenco Connect, conserva i privilegi nativi e non modifica le altre sessioni dell’utente. Le sessioni WordPress aperte attraverso Connect vengono ricontrollate a ogni richiesta; le sessioni native con password rimangono indipendenti.
+
+## Sessioni SSO
+
+**Identità e accessi → Sessioni attive** mostra utente, IP, inizio, ultima attività, client SSO e sessione corrente. Si può chiudere una sessione o tutte quelle di un utente, con conferma. La ricerca filtra l’elenco e viene segnalato un eventuale limite di 500 sessioni per client SSO.
+
+API e SDK espongono anche al cliente le proprie sessioni, sempre dall’app: `sessions()`, `logoutSession(id)`, `logoutAllSessions()`. Il server verifica la proprietà della sessione in Keycloak. I client non possono elencare o disconnettere altri utenti. Le sessioni offline non sono incluse.
+
+Il salvataggio della licenza offre **Disconnetti tutte le sessioni SSO degli utenti collegati**. Sono selezionati solo i subject collegati al cliente/app tramite ruoli o utenti locali; la chiusura SSO riguarda anche le altre app di quegli utenti. Il piano viene salvato prima della revoca esterna e il risultato distingue utenti disconnessi e tentativi non riusciti. I nuovi permessi valgono comunque al controllo successivo, anche senza forzare il logout. Operazioni tracciate nel registro.

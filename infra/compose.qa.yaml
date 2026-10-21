@@ -1,0 +1,52 @@
+# Collaudo locale aggiuntivo. Non utilizzare su produzione.
+services:
+ api:
+  environment:
+   CATALOG_INTERNAL_ORIGINS_JSON: '{"http://localhost:8090":"http://qa-wordpress"}'
+ qa-db:
+  image: mariadb:11.4.5
+  environment:
+   MARIADB_DATABASE: wordpress
+   MARIADB_USER: wordpress
+   MARIADB_PASSWORD: ${QA_DB_PASSWORD:?Esegui scripts/init-qa-env.mjs}
+   MARIADB_ROOT_PASSWORD: ${QA_DB_ROOT_PASSWORD:?Esegui scripts/init-qa-env.mjs}
+  volumes: [qa-db-data:/var/lib/mysql]
+  networks: [data]
+  healthcheck:
+   test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
+   interval: 5s
+   retries: 30
+ qa-wordpress:
+  image: wordpress:6.8.3-php8.3-apache
+  environment: &wp-env
+   WORDPRESS_DB_HOST: qa-db
+   WORDPRESS_DB_NAME: wordpress
+   WORDPRESS_DB_USER: wordpress
+   WORDPRESS_DB_PASSWORD: ${QA_DB_PASSWORD}
+   WORDPRESS_CONFIG_EXTRA: |
+    define('WP_ENVIRONMENT_TYPE', 'local');
+    define('EULAB_CONNECT_API', 'http://api:3000');
+    define('EULAB_CONNECT_STORAGE_KEY', '${QA_WP_STORAGE_KEY}');
+    define('EULAB_CONNECT_SSO_ENABLED', true);
+    define('EULAB_CONNECT_ISSUER', 'http://localhost:8080/realms/eulab');
+    define('EULAB_CONNECT_INTERNAL_ISSUER', 'http://keycloak:8080/realms/eulab');
+  ports: [127.0.0.1:8090:80]
+  volumes:
+   - qa-wp-data:/var/www/html
+   - ./plugins/wordpress/eulab-connect:/var/www/html/wp-content/plugins/eulab-connect:ro
+   - ./tests/wordpress/qa-probe.php:/var/www/html/wp-content/mu-plugins/eulab-qa-probe.php:ro
+  depends_on:
+   qa-db: {condition: service_healthy}
+  networks: [data,edge]
+ qa-wpcli:
+  image: wordpress:cli-2.12.0-php8.3
+  profiles: [tools]
+  user: '33:33'
+  environment: *wp-env
+  volumes:
+   - qa-wp-data:/var/www/html
+   - ./plugins/wordpress/eulab-connect:/var/www/html/wp-content/plugins/eulab-connect:ro
+  networks: [data,edge]
+volumes:
+ qa-db-data:
+ qa-wp-data:

@@ -1,0 +1,12 @@
+# docker compose -f compose.yaml -f infra/compose.runner-2.yaml up -d --build
+services:
+ runner-2:
+  image: eulab-connect-runner:latest
+  extends:
+   file: compose.yaml
+   service: runner
+  environment:
+   RUNNER_ID: runner-2
+  volumes: [openwa-profiles-2:/profiles]
+volumes:
+ openwa-profiles-2:

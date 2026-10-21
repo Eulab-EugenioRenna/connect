@@ -1,0 +1,6 @@
+FROM maven:3.9.11-eclipse-temurin-21 AS provider
+WORKDIR /build
+COPY infra/keycloak/providers/email-otp/ ./
+RUN mvn --batch-mode package
+FROM quay.io/keycloak/keycloak:26.3.3
+COPY --from=provider --chown=keycloak:keycloak /build/target/connect-mfa-0.1.0.jar /opt/keycloak/providers/connect-mfa.jar

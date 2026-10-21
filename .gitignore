@@ -1,0 +1,23 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+backups/
+*.log
+.DS_Store
+
+# Installation-local, single-use WordPress bootstrap code
+plugins/wordpress/eulab-connect/pairing.local.php
+.guardian.qa.json
+
+# Output compilazione provider Keycloak
+infra/keycloak/providers/**/target/
+
+# Local verification reports may include account and session data.
+/docs/verification/
+/.github/modernize/
+*.tgz
+*.tar.gz
+*.pem
+*.key

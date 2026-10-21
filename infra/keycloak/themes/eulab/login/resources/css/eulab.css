@@ -1,0 +1,148 @@
+/* Keep Keycloak's native forms, validation, password toggle and authentication flows. */
+:root {
+    color-scheme: light;
+    --eulab-ink: #233146;
+    --eulab-muted: #66738b;
+    --eulab-brand: #4354e7;
+    --pf-global--primary-color--100: #4354e7;
+    --pf-global--primary-color--200: #3444c5;
+    --pf-global--FontFamily--sans-serif: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+}
+
+.login-pf body {
+    margin: 0;
+    min-height: 100vh;
+    min-height: 100svh;
+    height: auto;
+    color: var(--eulab-ink);
+    font-family: var(--pf-global--FontFamily--sans-serif);
+    background:
+        radial-gradient(ellipse at 12% 18%, #dfe8f7 0, transparent 48%),
+        radial-gradient(ellipse at 90% 85%, #e0e4f5 0, transparent 42%),
+        #edf1f5;
+}
+
+.login-pf-page {
+    min-height: 100vh;
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 48px 24px;
+}
+
+#kc-header {
+    width: 100%;
+    margin: 0 0 32px;
+    padding: 0;
+    color: var(--eulab-ink);
+    text-align: center;
+}
+
+#kc-header-wrapper {
+    padding: 0;
+    font-size: inherit;
+    letter-spacing: normal;
+    text-transform: none;
+    color: inherit;
+}
+
+.eulab-brand { display: inline-flex; align-items: center; gap: 13px; text-align: left; }
+.eulab-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 15px;
+    background: linear-gradient(135deg, #2e92e8, #4030f0);
+    color: #fff;
+    font-size: 32px;
+    font-weight: 750;
+    line-height: 1;
+    box-shadow: 4px 7px 16px #5477d02e;
+}
+.eulab-wordmark { font-size: 22px; font-weight: 750; letter-spacing: 2px; line-height: 1.15; }
+.eulab-connect { display: block; margin-top: 5px; font-size: 10px; font-weight: 550; letter-spacing: 3.6px; color: var(--eulab-muted); }
+.eulab-tagline { display: block; margin-top: 22px; font-size: 13px; line-height: 1.5; color: var(--eulab-muted); }
+
+.login-pf-page .card-pf {
+    width: 460px;
+    max-width: 100%;
+    margin: 0;
+    padding: 36px 40px 28px;
+    background: #f9fafc;
+    border: 1px solid #fff;
+    border-radius: 24px;
+    box-shadow: 12px 12px 36px #cdd6e180, -8px -8px 26px #ffffffbd;
+}
+.login-pf-page .login-pf-header { margin: 0 0 26px; }
+h1#kc-page-title { margin: 0; text-align: left; color: var(--eulab-ink); font-size: 29px; font-weight: 650; letter-spacing: -.9px; line-height: 1.25; }
+#kc-content-wrapper, #kc-form-wrapper { margin-top: 0; }
+.login-pf-page .form-group { margin-bottom: 21px; }
+.login-pf-page .pf-c-form__label { margin-bottom: 8px; padding: 0; color: #52617a; font-size: 12px; font-weight: 600; }
+.login-pf-page .pf-c-form-control {
+    min-height: 48px;
+    padding: 12px 14px;
+    border: 1px solid #dbe2ee;
+    border-radius: 11px;
+    background: #fff;
+    color: var(--eulab-ink);
+    font: inherit;
+    font-size: 16px;
+    box-shadow: inset 1px 2px 4px #e4e9f333;
+}
+.login-pf-page .pf-c-form-control:focus { border-color: #7788e4; outline: 3px solid #4354e71f; outline-offset: 1px; }
+.login-pf-page .pf-c-form-control[aria-invalid="true"] { border-color: #b94747; }
+.login-pf-page .pf-c-input-group { align-items: stretch; }
+.login-pf-page .pf-c-input-group .pf-c-form-control { border-radius: 11px 0 0 11px; }
+.login-pf-page .pf-c-input-group .pf-c-button.pf-m-control { width: 48px; border: 1px solid #dbe2ee; border-left: 0; border-radius: 0 11px 11px 0; background: #fff; color: var(--eulab-muted); }
+.login-pf-page .pf-c-button::after { border: 0; }
+.login-pf-page a { color: #3d50bc; }
+.login-pf-page a:hover { color: #283a9e; text-decoration: underline; }
+.login-pf-page a:focus-visible, .login-pf-page button:focus-visible, .login-pf-page input[type="submit"]:focus-visible { outline: 3px solid #4354e7; outline-offset: 4px; }
+.login-pf-page .login-pf-settings { gap: 12px; margin-bottom: 25px; font-size: 12px; }
+#kc-form-buttons { margin-top: 0; }
+.login-pf-page .pf-c-button.pf-m-primary {
+    min-height: 48px;
+    padding: 12px 20px;
+    border: 0;
+    border-radius: 11px;
+    background: linear-gradient(110deg, #2e8be5, #4748e3);
+    color: #fff;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 650;
+    box-shadow: 4px 7px 16px #4774d729;
+    transition: box-shadow .18s, filter .18s;
+}
+.login-pf-page .pf-c-button.pf-m-primary:hover { filter: brightness(.96); box-shadow: 4px 9px 20px #4774d740; }
+.login-pf-page .pf-c-button:disabled { opacity: .6; cursor: wait; }
+.login-pf-page .pf-c-alert { border-radius: 11px; margin-bottom: 22px; box-shadow: none; }
+.login-pf-page .pf-c-form__helper-text.pf-m-error { display: block; margin-top: 8px; color: #a33333; font-size: 12px; }
+.login-pf-page .instruction { color: var(--eulab-muted); font-size: 13px; line-height: 1.65; }
+.eulab-footer { margin-top: 28px; padding-top: 22px; border-top: 1px solid #e0e6ef; text-align: center; color: var(--eulab-muted); }
+.eulab-footer p { margin: 0 0 7px; font-size: 12px; line-height: 1.6; }
+.eulab-footer > span { font-size: 10px; letter-spacing: .4px; }
+#kc-info { margin: 24px 0 0; }
+#kc-info-wrapper { padding: 16px; background: #edf1f7; border-radius: 11px; }
+#kc-locale { position: relative; top: auto; right: auto; width: auto; margin-bottom: 18px; text-align: right; }
+#kc-locale-dropdown button { color: var(--eulab-muted); font-size: 11px; }
+#kc-locale ul { border-radius: 9px; box-shadow: 0 6px 20px #2331461a; }
+#kc-attempted-username { overflow-wrap: anywhere; font-size: 17px; }
+
+@media (max-width: 520px) {
+    .login-pf-page { padding: 32px 20px; }
+    #kc-header { margin-bottom: 26px; }
+    .login-pf-page .card-pf { padding: 28px 24px 24px; border-radius: 21px; }
+    h1#kc-page-title { font-size: 26px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .login-pf-page .pf-c-button.pf-m-primary { transition: none; }
+}
+
+/* A single brand asset is copied from assets/brand/logo.svg. Keep its original colors. */
+.eulab-brand{width:224px;height:64px;background:url("../img/logo.svg") center/contain no-repeat;vertical-align:middle}
+.eulab-brand .eulab-mark,.eulab-brand .eulab-wordmark{display:none}
+.login-pf-page{justify-content:flex-start;padding-top:48px}

@@ -1,0 +1,43 @@
+import {readFile,stat} from 'node:fs/promises';
+import {parseEnv} from 'node:util';
+import {spawnSync} from 'node:child_process';
+import assert from 'node:assert/strict';
+import {isIP} from 'node:net';
+// Default is a read-only preflight. --apply is the explicit deployment action.
+const apply=process.argv.includes('--apply'),localIngress=process.argv.includes('--local-ingress');
+const envArg=process.argv.indexOf('--env-file');
+const file=envArg<0?'.env.production':process.argv[envArg+1];
+assert(file,'Specificare il file ambiente');
+const source=await readFile(file,'utf8'),env=parseEnv(source);
+const keys=source.split('\n').map(l=>l.match(/^([A-Z][A-Z0-9_]*)=/)?.[1]).filter(Boolean);
+assert.equal(keys.length,new Set(keys).size,'Variabili duplicate nel file produzione');
+assert.equal((await stat(file)).mode&0o777,0o600,'Usare chmod 600 .env.production');
+for(const key of ['POSTGRES_PASSWORD','REDIS_PASSWORD','DATA_ENCRYPTION_KEY','OIDC_CLIENT_SECRET','OIDC_IDENTITY_ADMIN_SECRET','KEYCLOAK_ADMIN_PASSWORD','EULAB_ADMIN_PASSWORD'])assert(/^[a-fA-F0-9]{64}$/.test(env[key]||''),`${key}: richiesto un segreto casuale di 32 byte in esadecimale`);
+assert.equal(env.PUBLIC_CONNECT_URL,'https://auth.eulab.cloud','Il deployment corrente è configurato per auth.eulab.cloud');
+assert.equal(env.PUBLIC_OIDC_ISSUER,env.PUBLIC_CONNECT_URL+'/sso/realms/eulab','Issuer produzione non coerente');
+assert(isIP(env.CONNECT_BIND_IP),'CONNECT_BIND_IP deve essere un indirizzo IP');
+assert(Number(env.CONNECT_HTTP_PORT)>=1&&Number(env.CONNECT_HTTP_PORT)<=65535,'CONNECT_HTTP_PORT non valido');
+assert(env.NPM_TRUSTED_CIDR&&env.NPM_TRUSTED_CIDR!=='0.0.0.0/0'&&env.NPM_TRUSTED_CIDR!=='::/0','Limitare NPM_TRUSTED_CIDR alla sorgente ingress');
+if(!localIngress)assert(!['127.0.0.1','::1','0.0.0.0','::'].includes(env.CONNECT_BIND_IP),'Impostare IP privato Connect, oppure --local-ingress per un proxy sulla stessa macchina');
+const base=['compose','--env-file',file,'-f','compose.yaml','-f','infra/compose.production.yaml'];
+function run(args,capture=false){const r=spawnSync('docker',args,{stdio:capture?'pipe':'inherit',encoding:'utf8',maxBuffer:8*1024*1024});if(r.status!==0)throw new Error('Comando Docker fallito: '+args.filter(v=>!v.includes('PASSWORD')).join(' '));return r.stdout;}
+const config=JSON.parse(run([...base,'config','--format','json'],true));
+assert.equal(config.name,'eulab-connect-production');
+assert.equal(config.services.keycloak.ports?.length||0,0,'Keycloak non deve esporre porte host');
+for(const name of ['postgres','redis'])assert.equal(config.services[name].ports?.length||0,0,`${name}: porte host inattese`);
+assert(!Object.keys(config.services).some(name=>name.startsWith('qa-')),'Overlay QA presente');
+assert.equal(config.services.keycloak.environment.KC_HOSTNAME,env.PUBLIC_CONNECT_URL+'/sso','Hostname Keycloak senza prefisso SSO');
+assert.equal(config.services.keycloak.environment.KC_HTTP_RELATIVE_PATH,'/sso');
+assert.equal(config.services.web.build.target,'web-production');
+assert.equal(config.services.web.build.args.EULAB_ADMIN_BASE_PATH,'/admin/');
+assert(config.services.runner.volumes.some(v=>v.type==='volume'&&v.target==='/profiles'),'Volume profili runner assente');
+run(['info','--format','{{.OSType}}'],true);
+console.log('Preflight produzione OK: segreti, ingress, volumi, servizi e Compose. Nessun segreto stampato.');
+if(apply){
+ console.log('Costruzione immagini. Gli aggiornamenti richiedono un backup precedente di database, volumi e chiave.');
+ run([...base,'build']);
+ run([...base,'up','-d','--wait','postgres','redis']);
+ run([...base,'run','--rm','--no-deps','migrate']);
+ run([...base,'up','-d','keycloak','api','runner','web']);
+ console.log('Servizi avviati. Completare bootstrap SSO/SMTP e verifiche pubbliche secondo docs/PRODUZIONE.md. Nessun account WhatsApp associato automaticamente.');
+}else console.log('Nessun servizio modificato. Per il deploy: npm run deploy:production -- --apply (aggiungere --local-ingress solo per proxy locale).');

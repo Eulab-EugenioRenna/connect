@@ -1,0 +1,18 @@
+import {z} from 'zod';
+import {uuid,key,name,origin} from './validation.js';
+export const adminCustomerSchema=z.object({name,reference:z.string().max(300).default('')}).strict();
+export const adminAppSchema=z.object({id:key,name,description:z.string().max(1000).default('')}).strict();
+export const adminInstallationSchema=z.object({customerId:uuid,appId:key,domain:origin,description:z.string().max(1000).default(''),integration:z.enum(['web','wordpress']).default('web'),basePath:z.string().regex(/^(\/[a-zA-Z0-9_-]+)*$/).default(''),fallbackUrl:z.string().url().optional()}).strict();
+export const adminConnectApplicationSchema=z.object({id:key.optional(),name,description:z.string().max(1000).default(''),customerId:uuid,domain:origin,integration:z.enum(['web','wordpress']),basePath:z.string().regex(/^(\/[a-zA-Z0-9_-]+)*$/).default(''),fallbackUrl:z.string().url().optional()}).strict();
+export const adminUpdateInstallationSchema=z.object({enabled:z.boolean(),rotateSecret:z.boolean().default(false),domain:origin.optional(),description:z.string().max(1000).optional(),integration:z.enum(['web','wordpress']).optional(),basePath:z.string().regex(/^(\/[a-zA-Z0-9_-]+)*$/).optional(),fallbackUrl:z.string().url().optional()}).strict();
+export const adminLicenseSchema=z.object({customerId:uuid,appId:key,state:z.enum(['active','suspended','expired']),expiresAt:z.string().datetime().nullable(),revokeSessions:z.boolean().default(false),features:z.array(z.object({key,purchased:z.boolean(),enabled:z.boolean()})).max(200),reason:name}).strict();
+export const adminIdentitySchema=z.object({subject:name,displayName:name,enabled:z.boolean()}).strict();
+export const adminMembershipSchema=z.object({subject:name,customerId:uuid,enabled:z.boolean(),roleIds:z.array(uuid).max(50)}).strict();
+export const adminRoleSchema=z.object({id:uuid.optional(),customerId:uuid,appId:key,name,permissions:z.array(key).max(1000),reason:name}).strict();
+export const adminLinkSchema=z.object({installationId:uuid,localUserId:name,subject:name}).strict();
+export const connectorAuthorizeSchema=z.object({installationId:uuid,permission:name}).strict();
+export const connectorRedeemSchema=z.object({code:z.string().min(32).max(100),domain:origin}).strict();
+export const connectorTicketSchema=z.object({installationId:uuid,localUserId:z.string().regex(/^[1-9][0-9]{0,14}$/).optional()}).strict();
+export const connectorTechnicalRedeemSchema=z.object({ticket:z.string().min(32).max(100)}).strict();
+export const connectorAccessAsSchema=z.object({localUserId:z.string().regex(/^[1-9][0-9]{0,14}$/),localUsername:name}).strict();
+export const whatsappWebhookSchema=z.object({url:z.string().url().max(2000)}).strict();

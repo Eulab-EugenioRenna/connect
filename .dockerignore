@@ -1,0 +1,25 @@
+node_modules
+dist
+.git
+.env
+.env.*
+backups
+EULAB_Admin_Anteprima_v0.2.html
+
+# Installation-local, single-use WordPress bootstrap code
+plugins/wordpress/eulab-connect/pairing.local.php
+.guardian.qa.json
+
+infra/keycloak/providers/**/target/
+
+# Provider source is released separately; Connect installs registry packages.
+/openwaunlocked/
+
+# Development and review material never enters the build context.
+/docs/
+/tests/
+/.github/
+README.md
+CONTEXT.md
+AGENTS.md
+/plugins/wordpress/euconnect.php

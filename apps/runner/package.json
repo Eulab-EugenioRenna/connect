@@ -1,0 +1,11 @@
+{
+  "name": "@eulab/openwa-runner",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@eulab/openwaunlocked-core": "1.0.0",
+    "@eulab/openwaunlocked-client": "1.0.0",
+    "@eulab/openwaunlocked-driver-puppeteer": "1.0.0",
+    "qrcode": "1.5.4"
+  }
+}

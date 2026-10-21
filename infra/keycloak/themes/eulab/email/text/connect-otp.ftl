@@ -1,0 +1,1 @@
+${msg("connectOtpBody",code,minutes)}

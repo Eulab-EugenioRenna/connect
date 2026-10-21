@@ -1,0 +1,107 @@
+name: eulab-connect
+x-common-env: &common-env
+ DATABASE_URL: postgres://connect:${POSTGRES_PASSWORD:?Configura .env}@postgres:5432/connect
+ REDIS_URL: redis://:${REDIS_PASSWORD:?Configura .env}@redis:6379
+ DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?Configura .env}
+ OIDC_ISSUER: ${PUBLIC_OIDC_ISSUER:-http://localhost:8080/realms/eulab}
+ OIDC_INTERNAL_ISSUER: http://keycloak:8080/realms/eulab
+ OIDC_JWKS_URL: http://keycloak:8080/realms/eulab/protocol/openid-connect/certs
+ OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?Configura .env}
+ OIDC_IDENTITY_ADMIN_SECRET: ${OIDC_IDENTITY_ADMIN_SECRET:-}
+services:
+ postgres:
+  image: postgres:17.6-bookworm
+  environment:
+   POSTGRES_USER: connect
+   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Configura .env}
+   POSTGRES_DB: connect
+  volumes:
+   - postgres-data:/var/lib/postgresql/data
+  networks: [data]
+  healthcheck:
+   test: [CMD-SHELL, pg_isready -U connect -d connect]
+   interval: 5s
+   retries: 20
+ redis:
+  image: redis:7.4.5-alpine
+  command: [sh, -c, 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
+  environment:
+   REDIS_PASSWORD: ${REDIS_PASSWORD:?Configura .env}
+  volumes: [redis-data:/data]
+  networks: [data]
+  healthcheck:
+   test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep PONG']
+   interval: 5s
+   retries: 20
+ keycloak:
+  image: eulab-connect-keycloak
+  build: {context: ., dockerfile: infra/keycloak/Dockerfile}
+  command: [start-dev, --import-realm]
+  environment:
+   KC_DB: postgres
+   KC_DB_URL: jdbc:postgresql://postgres:5432/connect
+   KC_DB_USERNAME: connect
+   KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+   KC_DB_SCHEMA: keycloak
+   KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-eulab-operator}
+   KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Configura .env}
+   KC_HTTP_ENABLED: 'true'
+   KC_HOSTNAME: ${PUBLIC_KEYCLOAK_URL:-http://localhost:8080}
+   OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+  ports: [127.0.0.1:8080:8080]
+  volumes:
+   - ./infra/keycloak/realm.json:/opt/keycloak/data/import/eulab-realm.json:ro
+   - ./infra/keycloak/themes/eulab:/opt/keycloak/themes/eulab:ro
+  depends_on:
+   migrate: {condition: service_completed_successfully}
+  networks: [data,edge]
+ migrate:
+  build: {context: ., target: migrate}
+  environment: *common-env
+  depends_on:
+   postgres: {condition: service_healthy}
+  networks: [data]
+ api:
+  build: {context: ., target: api}
+  environment:
+   <<: *common-env
+   SMTP_HOST: ${SMTP_HOST:-}
+   SMTP_PORT: ${SMTP_PORT:-587}
+   SMTP_FROM: ${SMTP_FROM:-}
+   SMTP_USER: ${SMTP_USER:-}
+   SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+   SMTP_SECURITY: ${SMTP_SECURITY:-starttls}
+  depends_on:
+   migrate: {condition: service_completed_successfully}
+   redis: {condition: service_healthy}
+   keycloak: {condition: service_started}
+  networks: [data,edge]
+  restart: unless-stopped
+ runner:
+  build: {context: ., target: runner}
+  environment:
+   <<: *common-env
+   RUNNER_ID: runner-1
+   RUNNER_CAPACITY: ${RUNNER_CAPACITY:-2}
+  volumes: [openwa-profiles-1:/profiles]
+  shm_size: 1gb
+  init: true
+  depends_on:
+   migrate: {condition: service_completed_successfully}
+   redis: {condition: service_healthy}
+  networks: [data,edge]
+  restart: unless-stopped
+ web:
+  build: {context: ., target: web}
+  ports: [127.0.0.1:8088:80]
+  volumes: [./infra/web-config.js:/usr/share/nginx/html/config.js:ro]
+  depends_on: [api]
+  networks: [edge]
+  restart: unless-stopped
+volumes:
+ postgres-data:
+ redis-data:
+ openwa-profiles-1:
+networks:
+ data: {internal: true}
+ edge: {}
