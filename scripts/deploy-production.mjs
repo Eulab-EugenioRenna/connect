@@ -39,5 +39,5 @@ if(apply){
  run([...base,'up','-d','--wait','postgres','redis']);
  run([...base,'run','--rm','--no-deps','migrate']);
  run([...base,'up','-d','keycloak','api','runner','web']);
- console.log('Servizi avviati. Completare bootstrap SSO/SMTP e verifiche pubbliche secondo docs/PRODUZIONE.md. Nessun account WhatsApp associato automaticamente.');
+ console.log('Servizi avviati dopo il bootstrap SSO automatico. Completare SMTP e verifiche pubbliche secondo docs/PRODUZIONE.md. Nessun account WhatsApp associato automaticamente.');
 }else console.log('Nessun servizio modificato. Per il deploy: npm run deploy:production -- --apply (aggiungere --local-ingress solo per proxy locale).');

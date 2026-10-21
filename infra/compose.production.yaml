@@ -29,6 +29,11 @@ services:
   environment: *production-oidc
  api:
   environment: *production-oidc
+ bootstrap:
+  environment:
+   <<: *production-oidc
+   KEYCLOAK_INTERNAL_URL: http://keycloak:8080/sso
+   PUBLIC_CONNECT_URL: https://auth.eulab.cloud
  runner:
   environment: *production-oidc
  web:

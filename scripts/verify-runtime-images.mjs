@@ -39,7 +39,7 @@ if(target==='runner'){
 console.log(target+': runtime e dipendenze OK');
 `;
 const sizes={};
-for(const target of ['api','migrate','runner']){
+for(const target of ['api','migrate','bootstrap','runner']){
  const image=prefix+'-'+target;
  const [info]=JSON.parse(docker(['image','inspect',image]));
  assert.equal(info.Config.User,'node');

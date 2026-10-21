@@ -49,11 +49,11 @@ Prima del primo avvio compilare gli IP sopra e configurare NPM/tunnel. Non copia
 
 ```sh
 docker compose -f compose.yaml -f infra/compose.production.yaml --env-file .env.production up -d --build
-# Dopo che Keycloak è pronto, configurare amministratore e servizio identità:
-docker compose -f compose.yaml -f infra/compose.production.yaml --env-file .env.production run --rm --no-deps --user 0:0 -e EULAB_ENV_FILE=/run/eulab/.env.production -v "$PWD/.env.production:/run/eulab/.env.production" -v "$PWD/scripts/setup-admin.mjs:/connect/setup-admin.mjs:ro" api node setup-admin.mjs
+# Equivalente abbreviato; il wrapper usa la produzione per default:
+./compose up -d
 ```
 
-Lo script usa il prefisso interno `/sso`, conserva le password esistenti e allinea il callback del pannello anche su un realm già presente. L’import JSON da solo non aggiorna un realm già importato. Per un database preesistente preservare nome progetto e volumi e fare un backup prima di modificare la configurazione; non usare reset o cancellazione volumi. Il nome progetto predefinito del nuovo stack produzione è `eulab-connect-production`.
+Il servizio `bootstrap` incluso nell'immagine attende Keycloak, usa il prefisso interno `/sso`, configura l'admin e il servizio identità e allinea il callback del pannello. API e runner attendono il completamento del bootstrap. Gli account esistenti conservano password, ID e profili; nessun file ambiente o sorgente deve essere montato per inizializzarli. L’import JSON da solo non aggiorna un realm già importato. Per un database preesistente preservare nome progetto e volumi e fare un backup prima di modificare la configurazione; non usare reset o cancellazione volumi. Il nome progetto predefinito del nuovo stack produzione è `eulab-connect-production`. Il comando nativo `docker compose up` mantiene lo sviluppo come ambiente predefinito.
 
 Il deploy remoto, la risoluzione DNS, il tunnel, l’HTTPS pubblico e il login SSO sul dominio definitivo non sono ancora stati eseguiti o verificati.
 
@@ -92,7 +92,7 @@ npm run deploy:production -- --apply
 
 `deploy:production` senza flag esegue solo il preflight: verifica segreti, origine/issuer, Docker, isolamento dei servizi, volumi e configurazione di produzione. Non richiede `.env` di sviluppo. Se NPM risiede sulla stessa macchina e comunica via loopback, aggiungere `--local-ingress` sia al controllo sia all’avvio. Il flag deve corrispondere alla topologia reale; non serve per un NPM remoto.
 
-`--apply` costruisce le immagini dai sorgenti e lockfile, attende PostgreSQL/Redis, esegue le migrazioni 001–009 e avvia i servizi. Non azzera database o volumi e non associa un numero WhatsApp. Completare quindi il bootstrap amministratore/servizio identità con il comando precedente, la configurazione SMTP e sicurezza, e le verifiche pubbliche. Per un aggiornamento fare prima un backup coerente di database e volumi usando la configurazione di produzione e conservare separatamente la chiave; non eseguire gli script di backup/ripristino locali sul progetto di produzione senza verificarne il contesto Compose.
+`--apply` costruisce le immagini dai sorgenti e lockfile, attende PostgreSQL/Redis, esegue le migrazioni 001–009 e avvia i servizi dopo il bootstrap amministratore/servizio identità automatico. Non azzera database o volumi e non associa un numero WhatsApp. Completare quindi la configurazione SMTP e sicurezza e le verifiche pubbliche. Per un aggiornamento fare prima un backup coerente di database e volumi usando la configurazione di produzione e conservare separatamente la chiave; non eseguire gli script di backup/ripristino locali sul progetto di produzione senza verificarne il contesto Compose.
 
 ## Accettazione prima dell’apertura agli utenti
 
@@ -120,6 +120,7 @@ La build Docker separa gli input e le cache di backend, frontend e dipendenze. I
 | --- | --- |
 | API | Bundle API e dipendenze di produzione |
 | Migrazioni | Bundle migrazioni, dipendenze di produzione e SQL `infra/postgres` |
+| Bootstrap | Bundle inizializzazione SSO e dipendenze di produzione; nessun sorgente o file ambiente |
 | Runner | Bundle runner, dipendenze di produzione, pacchetti OpenWAUnlocked, asset WhatsApp e Chromium |
 | Web | Nginx e asset statici compilati, inclusi gli installer WordPress scaricabili |
 

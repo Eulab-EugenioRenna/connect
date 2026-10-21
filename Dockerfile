@@ -12,7 +12,7 @@ COPY tsconfig.json ./
 COPY apps/api ./apps/api
 COPY apps/runner/src ./apps/runner/src
 COPY packages/sdk ./packages/sdk
-COPY scripts/build-runtime.mjs ./scripts/build-runtime.mjs
+COPY scripts/build-runtime.mjs scripts/setup-admin.mjs ./scripts/
 RUN npm run build:runtime
 
 FROM dependencies AS web-build
@@ -56,6 +56,10 @@ COPY --from=production-dependencies /connect/node_modules ./node_modules
 FROM server-runtime AS api
 COPY --from=server-build /connect/dist/runtime/api.mjs ./api.mjs
 CMD ["node","api.mjs"]
+
+FROM server-runtime AS bootstrap
+COPY --from=server-build /connect/dist/runtime/bootstrap.mjs ./bootstrap.mjs
+CMD ["node","bootstrap.mjs"]
 
 FROM server-runtime AS migrate
 COPY --from=server-build /connect/dist/runtime/migrate.mjs ./migrate.mjs

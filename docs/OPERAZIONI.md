@@ -4,23 +4,17 @@ Lo stack Compose è per il collaudo locale. Prima della pubblicazione sui server
 
 ## Avvio
 
+Con `.env` configurato, senza installare dipendenze sul computer:
+
+```sh
+docker compose up -d
 ```
-npm ci
-node scripts/init-env.mjs
-docker compose config --quiet
-docker compose up -d --build
-```
+
+`docker compose up` usa lo sviluppo; `./compose up` seleziona invece `.env.production` e l'overlay produzione. Migrazioni, attesa di Keycloak, admin iniziale e servizio identità sono gestiti automaticamente dal servizio `bootstrap`; API e runner partono dopo il suo completamento.
 
 Dashboard: http://localhost:8088. Keycloak: http://localhost:8080. OpenAPI: http://localhost:8088/v1/docs. PostgreSQL, Redis e OpenWA non pubblicano porte host. I profili OpenWA risiedono nel volume del runner; il runner ha egress per WhatsApp. OpenWAUnlocked core, client e driver Puppeteer sono fissati a 1.0.0 con lockfile separato in `apps/runner/package-lock.json`; la build usa `npm ci`. Salvare anche immagini e digest prima del rilascio. Chromium e gli strumenti di compressione sono installati dal repository Debian: il lock npm non fissa questi pacchetti di sistema.
 
-Leggere le credenziali bootstrap **localmente da `.env`**, senza incollarle in chat. Per configurare il primo utente Admin eseguire dal progetto, dopo l’avvio di Keycloak:
-
-```sh
-docker compose run --rm --no-deps --user 0:0 -v "$PWD/.env:/connect/.env" -v "$PWD/scripts/setup-admin.mjs:/connect/setup-admin.mjs:ro" api node setup-admin.mjs
-docker compose up -d --no-build api web
-```
-
-Lo script genera i campi mancanti `EULAB_ADMIN_USERNAME`, `EULAB_ADMIN_EMAIL`, `EULAB_ADMIN_NAME`, `EULAB_ADMIN_PASSWORD` e `OIDC_IDENTITY_ADMIN_SECRET` in `.env`; si possono configurare i primi quattro prima di eseguirlo. Non sovrascrive la password di utenti esistenti e non promuove automaticamente un omonimo Cliente. Il client server `connect-identity-admin` è riservato al realm `eulab`, con `view-users`, `query-users`, `manage-users`, `view-realm`; il segreto resta nel backend. Dalla dashboard **Identità e accessi** si gestiscono creazione, nome, email, abilitazione e tipo Admin/Cliente. Il bootstrap admin del master realm non è automaticamente un amministratore applicativo. Registrazione pubblica disabilitata. [L’import Keycloak supporta i placeholder di ambiente](https://www.keycloak.org/server/importExport). Il secret del client confidenziale `connect-api` viene importato dall’ambiente. Il realm viene importato solo se assente: le successive modifiche al JSON non aggiornano un realm esistente. In quel caso usare console/amministrazione Keycloak, senza cancellare dati.
+Leggere le credenziali bootstrap **localmente da `.env`**, senza incollarle in chat. Configurare `EULAB_ADMIN_USERNAME`, `EULAB_ADMIN_EMAIL`, `EULAB_ADMIN_NAME`, `EULAB_ADMIN_PASSWORD` e `OIDC_IDENTITY_ADMIN_SECRET` prima del primo avvio. Compose crea il primo Admin automaticamente: non servono script successivi a `up`. Non sovrascrive password, ID o profili di utenti esistenti e non promuove automaticamente un omonimo Cliente. Il client server `connect-identity-admin` è riservato al realm `eulab`, con i ruoli di gestione utenti, realm e client; il segreto resta nel backend. Dalla dashboard **Identità e accessi** si gestiscono creazione, nome, email, abilitazione e tipo Admin/Cliente. Il bootstrap admin del master realm non è automaticamente un amministratore applicativo. Registrazione pubblica disabilitata. [L’import Keycloak supporta i placeholder di ambiente](https://www.keycloak.org/server/importExport). Il secret del client confidenziale `connect-api` viene importato dall’ambiente. Il realm viene importato solo se assente: le successive modifiche al JSON non aggiornano un realm esistente. Il bootstrap aggiorna i callback del pannello senza reimportare il realm; per gli altri interventi usare console/amministrazione Keycloak, senza cancellare dati.
 
 Il bootstrap SQL è versionato e protetto da lock PostgreSQL. Non viene mai eseguito un reset. Keycloak usa lo schema `keycloak`, Connect lo schema `public` nello stesso PostgreSQL.
 

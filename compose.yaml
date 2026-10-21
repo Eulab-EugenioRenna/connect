@@ -7,7 +7,7 @@ x-common-env: &common-env
  OIDC_INTERNAL_ISSUER: http://keycloak:8080/realms/eulab
  OIDC_JWKS_URL: http://keycloak:8080/realms/eulab/protocol/openid-connect/certs
  OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?Configura .env}
- OIDC_IDENTITY_ADMIN_SECRET: ${OIDC_IDENTITY_ADMIN_SECRET:-}
+ OIDC_IDENTITY_ADMIN_SECRET: ${OIDC_IDENTITY_ADMIN_SECRET:?Configura .env}
 services:
  postgres:
   image: postgres:17.6-bookworm
@@ -35,6 +35,7 @@ services:
    retries: 20
  keycloak:
   image: eulab-connect-keycloak
+  pull_policy: build
   build: {context: ., dockerfile: infra/keycloak/Dockerfile}
   command: [start-dev, --import-realm]
   environment:
@@ -74,9 +75,25 @@ services:
   depends_on:
    migrate: {condition: service_completed_successfully}
    redis: {condition: service_healthy}
-   keycloak: {condition: service_started}
+   bootstrap: {condition: service_completed_successfully}
   networks: [data,edge]
   restart: unless-stopped
+ bootstrap:
+  build: {context: ., target: bootstrap}
+  environment:
+   <<: *common-env
+   CONNECT_BOOTSTRAP: 'true'
+   KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+   KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-eulab-operator}
+   KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Configura .env}
+   EULAB_ADMIN_USERNAME: ${EULAB_ADMIN_USERNAME:-admin}
+   EULAB_ADMIN_EMAIL: ${EULAB_ADMIN_EMAIL:-admin@eulab.local}
+   EULAB_ADMIN_NAME: ${EULAB_ADMIN_NAME:-Amministratore EULab}
+   EULAB_ADMIN_PASSWORD: ${EULAB_ADMIN_PASSWORD:?Configura .env}
+  depends_on:
+   keycloak: {condition: service_started}
+   migrate: {condition: service_completed_successfully}
+  networks: [data]
  runner:
   build: {context: ., target: runner}
   environment:
@@ -87,6 +104,7 @@ services:
   shm_size: 1gb
   init: true
   depends_on:
+   bootstrap: {condition: service_completed_successfully}
    migrate: {condition: service_completed_successfully}
    redis: {condition: service_healthy}
   networks: [data,edge]

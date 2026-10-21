@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 const root=process.cwd(),dest=resolve('dist/releases');await mkdir(dest,{recursive:true});
-const roots=['apps','packages','scripts','infra','plugins','assets','tests','docs','README.md','CONTEXT.md','package.json','package-lock.json','tsconfig.json','Dockerfile','compose.yaml','.dockerignore','.env.example'];
+const roots=['apps','packages','scripts','infra','plugins','assets','tests','docs','README.md','CONTEXT.md','package.json','package-lock.json','tsconfig.json','Dockerfile','compose','compose.yaml','.dockerignore','.env.example'];
 const files=[];
 async function collect(name){
  const base=name.split('/').at(-1);

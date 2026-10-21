@@ -23,14 +23,19 @@ Logo condiviso: sostituire `assets/brand/logo.svg`, poi `npm run brand:sync` (au
 
 ## Avviare
 
-```
-npm ci
-node scripts/init-env.mjs
-docker compose config --quiet
-docker compose up -d --build
+Con il file `.env` configurato (variabili in `.env.example`), basta Docker; npm e Node sul computer non sono richiesti:
+
+```sh
+docker compose up
 ```
 
+L'avvio costruisce le immagini mancanti, applica le migrazioni, attende Keycloak e completa il servizio `bootstrap` prima di avviare API e runner. Il bootstrap crea l'admin iniziale e il servizio identità, configura i callback locali e conserva utenti, password e profili già esistenti. Non sono necessari comandi di inizializzazione dopo `up`.
+
+Per la produzione, con `.env.production` e ingress già configurati, usare `./compose up`: il wrapper seleziona automaticamente l'overlay produzione. `docker compose up` usa lo sviluppo. Sono disponibili anche `./compose up -prod` e `./compose up -dev`; aggiungere `-d` per l'avvio in background. I due ambienti usano progetti e volumi distinti.
+
 Dashboard: **http://localhost:8088**. Keycloak: **http://localhost:8080**. OpenAPI: **http://localhost:8088/v1/docs**.
+
+La dashboard locale supporta anche `http://127.0.0.1:8088/`. Il bootstrap aggiorna i callback di un realm locale già esistente senza reimportarlo.
 
 | Accesso | Credenziali locali in `.env` |
 |---|---|
@@ -39,7 +44,7 @@ Dashboard: **http://localhost:8088**. Keycloak: **http://localhost:8080**. OpenA
 
 La console di gestione Keycloak è su http://localhost:8080/admin/master/console/. Gli utenti applicativi Admin/Cliente appartengono al realm `eulab`.
 
-Configurare l’amministratore iniziale con `scripts/setup-admin.mjs`: nome utente, nome, email e password risiedono in `.env` (`EULAB_ADMIN_*`). È un utente dello stesso realm `eulab` usato dai clienti. In **Identità e accessi** si creano e modificano gli utenti SSO, scegliendo il tipo **Admin** o **Cliente**. Il tipo Admin concede il pannello amministrativo; i cambi di tipo revocano le sessioni precedenti. Il bootstrap del master realm rimane separato. I segreti vengono generati in `.env`, con permessi 0600, e non vengono stampati. [Istruzioni operative](docs/OPERAZIONI.md).
+L’amministratore iniziale viene creato automaticamente da Compose usando nome utente, nome, email e password di `.env` (`EULAB_ADMIN_*`). È un utente dello stesso realm `eulab` usato dai clienti. I valori del file ambiente inizializzano l'account: modificarli dopo la creazione non reimposta password o profilo esistenti. In **Identità e accessi** si creano e modificano gli utenti SSO, scegliendo il tipo **Admin** o **Cliente**. Il tipo Admin concede il pannello amministrativo; i cambi di tipo revocano le sessioni precedenti. Il bootstrap del master realm rimane separato. Conservare i segreti solo nei file ambiente, con permessi 0600. [Istruzioni operative](docs/OPERAZIONI.md).
 
 ## Collegare un’applicazione
 

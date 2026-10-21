@@ -1,0 +1,32 @@
+#!/bin/sh
+# This wrapper defaults to production; native docker compose uses development.
+set -eu
+cd "$(dirname "$0")"
+production=false
+development=false
+for arg in "$@"; do
+ case "$arg" in
+  -prod|--prod) production=true ;;
+  -dev|--dev) development=true ;;
+ esac
+done
+if ! "$production" && ! "$development"; then production=true; fi
+if "$production" && "$development"; then
+ echo 'Scegliere un solo ambiente: -dev oppure -prod' >&2
+ exit 2
+fi
+for arg in "$@"; do
+ shift
+ case "$arg" in
+  -prod|--prod|-dev|--dev) ;;
+  *) set -- "$@" "$arg" ;;
+ esac
+done
+if [ "$#" -eq 0 ]; then set -- up; fi
+if "$production"; then
+ echo 'Connect: ambiente produzione'
+ exec docker compose --env-file .env.production -f compose.yaml -f infra/compose.production.yaml "$@"
+else
+ echo 'Connect: ambiente sviluppo'
+ exec docker compose --env-file .env -f compose.yaml "$@"
+fi
