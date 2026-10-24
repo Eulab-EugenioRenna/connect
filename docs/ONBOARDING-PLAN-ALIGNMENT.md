@@ -100,3 +100,7 @@ Verifica della risoluzione guidata: suite completa 119/119; i quattro incroci ap
 La candidata locale SDK 0.10.0 aggiunge `oidcTransportOrigin` per le chiamate server al provider (token, JWKS, revoca/logout, discovery). URL browser e validazione issuer/audience restano canonici; il valore è un’origine configurata soltanto nel backend, con le stesse restrizioni HTTPS/loopback dello SDK. ALORA usa il proprio gateway TLS locale, evitando che localhost nel container punti al container stesso. Nessuna modifica alle pratiche, alle API Connect o allo schema 013.
 
 Tarball ricostruito, SHA-256 `2e07f936a8d52b9ff47862dcd674e0afa39fe0a4c9919ffa37d4cd9380cc294d`; manifest e consumer aggiornati. Compilazione SDK/API e lint ALORA passati; discovery dal container HTTP 200 con issuer canonico. Non sono stati ripetuti test funzionali o login: l’accettazione operativa resta dell’utente. Nessuna pubblicazione npm.
+
+## Conferma manuale dell’utente — 24 ottobre 2026
+
+Dopo il riallineamento del client OIDC (audience connect-api e scope basic), l’utente ha confermato che l’accesso all’admin ALORA funziona. È una verifica manuale sull’installazione Docker locale: non equivale al collaudo di rinnovo, revoca, permessi, MFA o produzione. Nessuna migrazione o sessione utente è stata eseguita automaticamente per questa verifica.

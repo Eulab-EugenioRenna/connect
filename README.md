@@ -115,3 +115,7 @@ Dominio `https://auth.eulab.cloud`, pannello `/admin/`, SSO `/sso/`. Ingresso at
 ## Ambienti e comandi
 
 [Guida unica dev, produzione, SMTP e comandi di verifica](docs/AMBIENTI-E-COMANDI.md). `npm run env:check` controlla entrambi i file ambiente senza stampare segreti o avviare servizi. La gestione MFA per persona è in **Utenti e accessi → Sicurezza e preferenze**; SMTP e durata SSO sono in **Impostazioni accesso**.
+
+## SDK: riferimento pubblico
+
+Il pacchetto ufficiale è [@eulab/connect su npm](https://www.npmjs.com/package/@eulab/connect); il codice è in [packages/sdk](./packages/sdk) e il contratto applicativo in [INTEGRATION.md](./packages/sdk/INTEGRATION.md). La candidata locale 0.10.0 resta distinta dall’ultima versione pubblicata: la sua pubblicazione non è stata eseguita durante l’integrazione ALORA. Verificare il registry prima di sostituire il tarball consumer con una versione npm esatta.
