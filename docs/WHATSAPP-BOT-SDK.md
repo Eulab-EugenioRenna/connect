@@ -90,7 +90,7 @@ Stato, risposta in outbox ed evento vengono scritti nella stessa transazione. Gl
 
 ## Installazione e verifica
 
-Applicare tutte le migrazioni additive fino a `009-whatsapp-unlocked.sql` con `npm run db:migrate` **prima** di aggiornare API e runner. Non cancella archivi, messaggi o credenziali. Dopo l’aggiornamento distribuire anche l’admin e il pacchetto SDK 0.8.0 generato localmente.
+Applicare tutte le migrazioni additive fino a `011-app-onboarding.sql` con `npm run db:migrate` **prima** di aggiornare API e runner. La 010 aggiunge solo la revoca dell’accesso a una singola applicazione; la 011 aggiunge il contratto di attivazione/migrazione e la copia cifrata del segreto delle installazioni. Nessuna delle due cancella archivi, messaggi o credenziali. Dopo l’aggiornamento distribuire anche l’admin e il pacchetto SDK generato localmente (0.9.0 per il contratto di onboarding).
 
 Test locali: motore, API Nest con PostgreSQL WASM, SDK, autorizzazioni cliente, isolamento, rollback, persistenza, deduplica, scadenza, sospensione e webhook. Fixture PDF renderizzata e ispezionata; formati multimediali riconosciuti automaticamente.
 

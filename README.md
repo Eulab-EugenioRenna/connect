@@ -1,5 +1,13 @@
 # EULab Connect
 
+## SDK applicativo 0.10.0
+
+Per nuove app: presenter tecnico → richiesta negli endpoint esistenti → scelta/creazione amministrativa → configuration.sync server → SSO. Non serve un intake parallelo. ALORA ha adottato il percorso; il collaudo utente resta da eseguire. [Contratto, livelli di evidenza e vincoli di riuso](docs/ONBOARDING-PLAN-ALIGNMENT.md).
+
+
+Facciata server indipendente dai framework, store PostgreSQL condiviso, recupero password con prova legacy separata ed esempio Workshop. [Guida SDK](packages/sdk/INTEGRATION.md), [allineamento pratiche e bootstrap](docs/ONBOARDING-PLAN-ALIGNMENT.md), [configurazione ALORA sviluppo](docs/SDK-ALORA-DEVELOPMENT.md), [verifiche e limiti](docs/SDK-0.10.0-VERIFICATION.md). `npm run package:sdk` genera il tarball locale; `npm run test:sdk:real` verifica provider temporanei. Nessuna pubblicazione automatica.
+
+
 ## Repository
 Connect: https://github.com/Eulab-EugenioRenna/connect
 
@@ -52,8 +60,9 @@ L’amministratore iniziale viene creato automaticamente da Compose usando nome 
 2. **Applicazioni → Aggiungi app**: nome, dominio, descrizione, cliente, webapp/WordPress, eventuale sottocartella e URL di fallback. L’operazione registra applicazione e installazione nella stessa transazione.
 3. Conservare la credenziale server mostrata una sola volta. Il fallback omesso diventa `<dominio><sottocartella>/eulab/connect/functions`; l’SDK aggiunge la chiave della funzione.
 4. Esporre la matrice versionata con GET dall’app o dal plugin; Connect acquisisce automaticamente l’URL. Le nuove funzioni richiedono abilitazione e assegnazione esplicite. Vedi [funzioni, fallback e sessioni](docs/FUNZIONI-E-SESSIONI.md).
-5. Configurare acquisto, abilitazione, scadenza, ruoli, appartenenze e collegamento esplicito tra subject Keycloak e ID utente locale. Nessuna password viene importata; nessuna identità viene collegata tramite uguaglianza dell’email.
-6. Per WordPress, configurare il codice monouso nel file locale del plugin `pairing.local.php`: associazione automatica, nessuna pagina Impostazioni. In **Applicazioni → Siti WordPress → Utenti e accesso**, l’Admin Connect vede e filtra gli utenti sincronizzati e sceglie **Accedi come**. Il plugin apre l’account locale scelto con i suoi permessi, senza creare account tecnici e senza richiedere collegamenti SSO personali agli utenti WordPress. [Flusso e configurazione attuali](docs/WORDPRESS-ACCESSO.md).
+5. Configurare acquisto, abilitazione, scadenza, ruoli, appartenenze e collegamento esplicito tra subject Keycloak e ID utente locale. Le app esistenti possono inizializzare una nuova identità con la password appena verificata localmente tramite `mirrorUser({initialPassword})`: Connect la inoltra al provider e non la conserva. Nessuna identità viene collegata tramite uguaglianza dell’email. Il titolare può gestire la squadra con le API `/v1/team`, sempre entro cliente, applicazione, licenza e propria delega; le operazioni di modifica richiedono `team.manage`.
+6. Per applicazioni con account locali (ALORA) usare il contratto di **attivazione assistita e migrazione obbligatoria**: la sorgente backend registra il deployment prima dell’app, invia la richiesta con la password verificata localmente e l’Admin EULAB esegue la pratica da **Attivazioni e migrazioni**. La password resta cifrata con TTL e viene cancellata alla conclusione; nessun accesso locale alternativo e nessuna unione per email. [Contratto, endpoint, configurazione e limiti](docs/ATTIVAZIONE-MIGRAZIONE.md).
+7. Per WordPress, configurare il codice monouso nel file locale del plugin `pairing.local.php`: associazione automatica, nessuna pagina Impostazioni. In **Applicazioni → Siti WordPress → Utenti e accesso**, l’Admin Connect vede e filtra gli utenti sincronizzati e sceglie **Accedi come**. Il plugin apre l’account locale scelto con i suoi permessi, senza creare account tecnici e senza richiedere collegamenti SSO personali agli utenti WordPress. [Flusso e configurazione attuali](docs/WORDPRESS-ACCESSO.md).
 
 
 Un’applicazione può avere altre installazioni dalla sezione Installazioni. L’URL autorizzato è un’origine esatta (`https://dominio`, con porta se necessaria); la sottocartella è separata. Il fallback deve restare sulla stessa origine.

@@ -22,8 +22,8 @@ try{
  const records=JSON.parse(await readFile(join(scratch,'manifest.json'),'utf8'));
  const [sdk]=JSON.parse(run('npm',['pack','--json','--pack-destination',scratch],join(root,'packages/sdk'),true));
  assert.equal(sdk.name,'@eulab/connect');
- assert(sdk.files.every(({path})=>path==='package.json'||path==='README.md'||/^dist\/.*\.(js|d\.ts)$/.test(path)),'Contenuto SDK inatteso');
- for(const file of ['browser.js','server.js','browser.d.ts','server.d.ts'])assert(sdk.files.some(({path})=>path==='dist/'+file),file);
+ assert(sdk.files.every(({path})=>path==='package.json'||path==='README.md'||path==='INTEGRATION.md'||/^examples\/workshop\/(?:README\.md|package\.json|server\.mjs|app\.js|index\.html|schema\.sql|\.env\.example)$/.test(path)||/^migrations\/\d+-[a-z-]+\.sql$/.test(path)||/^dist\/.*\.(js|d\.ts)$/.test(path)),'Contenuto SDK inatteso');
+ for(const file of ['browser.js','server.js','application.js','application-store.js','browser.d.ts','server.d.ts','application.d.ts'])assert(sdk.files.some(({path})=>path==='dist/'+file),file);
  records.push({name:sdk.name,version:sdk.version,filename:sdk.filename,files:sdk.files.length});
  for(const record of records){
   const data=await readFile(join(scratch,record.filename));

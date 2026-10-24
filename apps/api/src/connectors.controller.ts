@@ -36,7 +36,7 @@ export class ConnectorsController {
      const code=(await db.query('SELECT c.* FROM pairing_codes c JOIN installations i ON i.id=c.installation_id WHERE c.hash=$1 AND c.consumed_at IS NULL AND c.expires_at>now() AND i.domain=$2 AND i.enabled=true FOR UPDATE OF c',[hash(b.code),b.domain])).rows[0];
      if(!code)throw new UnauthorizedException('Codice scaduto, usato o dominio non autorizzato');
      await db.query('UPDATE pairing_codes SET consumed_at=now() WHERE hash=$1',[hash(b.code)]);
-     await db.query('UPDATE installations SET secret_hash=$2 WHERE id=$1',[code.installation_id,hash(credential)]);
+     await db.query('UPDATE installations SET secret_hash=$2,secret_cipher=$3 WHERE id=$1',[code.installation_id,hash(credential),seal(credential)]);
      await audit(db,'pairing','pairing.redeem',code.installation_id,{domain:b.domain});const installation=(await db.query('SELECT app_id FROM installations WHERE id=$1',[code.installation_id])).rows[0];return {installationId:code.installation_id,appId:installation.app_id,secret:credential};
    });
  }

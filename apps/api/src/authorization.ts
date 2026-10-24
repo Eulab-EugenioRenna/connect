@@ -9,7 +9,8 @@ export class Authorization {
     if (p.admin) return { allowed:true, reason:'technical_admin' };
     if (p.installationId !== installationId || !p.subject) return { allowed:false, reason:'installation_or_identity_missing' };
     const [f] = await this.db.query(`SELECT i.enabled AS "installationEnabled", COALESCE(u.enabled,false) AS "identityEnabled",
-      COALESCE(m.enabled,false) AS "memberEnabled", (lk.subject IS NOT NULL) AS linked, l.state AS "licenseState", l.expires_at AS "expiresAt",
+      COALESCE(m.enabled,false) AS "memberEnabled", (lk.subject IS NOT NULL) AS linked,
+      EXISTS(SELECT 1 FROM app_access_revocations rv WHERE rv.customer_id=i.customer_id AND rv.app_id=i.app_id AND rv.subject=$2) AS "accessRevoked", l.state AS "licenseState", l.expires_at AS "expiresAt",
       COALESCE(e.purchased,false) AS purchased, COALESCE(e.enabled,false) AS "featureEnabled", COALESCE(f.active AND perm.active,false) AS "catalogActive",
       EXISTS(SELECT 1 FROM assignments a JOIN roles r ON r.id=a.role_id JOIN role_permissions rp ON rp.role_id=r.id
         WHERE a.subject=$2 AND a.customer_id=i.customer_id AND r.app_id=i.app_id AND rp.app_id=i.app_id AND rp.permission_key=$3) AS "permissionGranted"
@@ -22,10 +23,12 @@ export class Authorization {
     return f ? decision(f) : { allowed:false, reason:'installation_missing' };
   }
   async access(p:Principal,installationId:string){
-    const [i]=await this.db.query(`SELECT i.app_id,i.enabled,u.enabled AS identity_enabled,m.enabled AS member_enabled,lk.local_user_id,l.state AS license_state,l.expires_at,a.catalog_version,a.catalog_source_version,a.catalog_sync_error FROM installations i JOIN applications a ON a.id=i.app_id LEFT JOIN identities u ON u.subject=$2 LEFT JOIN memberships m ON m.subject=$2 AND m.customer_id=i.customer_id LEFT JOIN local_links lk ON lk.installation_id=i.id AND lk.subject=$2 LEFT JOIN licenses l ON l.customer_id=i.customer_id AND l.app_id=i.app_id WHERE i.id=$1`,[installationId,p.subject||'']);
+    const [i]=await this.db.query(`SELECT i.app_id,i.enabled,u.enabled AS identity_enabled,m.enabled AS member_enabled,lk.local_user_id,l.state AS license_state,l.expires_at,a.catalog_version,a.catalog_source_version,a.catalog_sync_error,
+      EXISTS(SELECT 1 FROM app_access_revocations rv WHERE rv.customer_id=i.customer_id AND rv.app_id=i.app_id AND rv.subject=$2) AS access_revoked
+      FROM installations i JOIN applications a ON a.id=i.app_id LEFT JOIN identities u ON u.subject=$2 LEFT JOIN memberships m ON m.subject=$2 AND m.customer_id=i.customer_id LEFT JOIN local_links lk ON lk.installation_id=i.id AND lk.subject=$2 LEFT JOIN licenses l ON l.customer_id=i.customer_id AND l.app_id=i.app_id WHERE i.id=$1`,[installationId,p.subject||'']);
     const checks:[boolean,string][]=[
       [!!i,'installation_missing'],[!!i?.enabled,'installation_disabled'],[!!p.subject&&(p.admin||p.installationId===installationId),'installation_or_identity_missing'],
-      [p.admin||!!i?.identity_enabled,'identity_disabled'],[p.admin||!!i?.member_enabled,'membership_disabled'],[p.admin||!!i?.local_user_id,'identity_not_linked'],
+      [p.admin||!i?.access_revoked,'access_revoked'],[p.admin||!!i?.identity_enabled,'identity_disabled'],[p.admin||!!i?.member_enabled,'membership_disabled'],[p.admin||!!i?.local_user_id,'identity_not_linked'],
       [p.admin||i?.license_state==='active','license_inactive'],[p.admin||!i?.expires_at||new Date(i.expires_at)>new Date(),'license_expired']
     ];
     const denied=checks.find(([ok])=>!ok),canLogin=!denied;

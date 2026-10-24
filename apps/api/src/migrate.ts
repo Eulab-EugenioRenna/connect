@@ -44,6 +44,22 @@ try {
       await db.query(await readFile('infra/postgres/009-whatsapp-unlocked.sql','utf8'));
       await db.query("INSERT INTO schema_migrations(version) VALUES('009')");
     }
+    if (!(await db.query("SELECT 1 FROM schema_migrations WHERE version='010'")).rowCount) {
+      await db.query(await readFile('infra/postgres/010-team-delegation.sql','utf8'));
+      await db.query("INSERT INTO schema_migrations(version) VALUES('010')");
+    }
+    if (!(await db.query("SELECT 1 FROM schema_migrations WHERE version='011'")).rowCount) {
+      await db.query(await readFile('infra/postgres/011-app-onboarding.sql','utf8'));
+      await db.query("INSERT INTO schema_migrations(version) VALUES('011')");
+    }
+    if (!(await db.query("SELECT 1 FROM schema_migrations WHERE version='012'")).rowCount) {
+      await db.query(await readFile('infra/postgres/012-onboarding-recovery.sql','utf8'));
+      await db.query("INSERT INTO schema_migrations(version) VALUES('012')");
+    }
+    if (!(await db.query("SELECT 1 FROM schema_migrations WHERE version='013'")).rowCount) {
+      await db.query(await readFile('infra/postgres/013-onboarding-presenters.sql','utf8'));
+      await db.query("INSERT INTO schema_migrations(version) VALUES('013')");
+    }
   });
-  console.log('Migrazioni 001–009 verificate');
+  console.log('Migrazioni 001–013 verificate');
 } finally { await database.onModuleDestroy(); }

@@ -14,7 +14,7 @@ import {RequestContext} from '../apps/api/src/auth.js';
 process.env.DATA_ENCRYPTION_KEY='a'.repeat(64);
 const req:RequestContext={headers:{},principal:{admin:true,technician:true,server:false,subject:'operator',accessToken:'test-access-token'}};
 async function setup(){
- const pg=new PGlite();await pg.exec(await readFile('infra/postgres/001-connect.sql','utf8'));await pg.exec(await readFile('infra/postgres/004-function-sources.sql','utf8'));await pg.exec(await readFile('infra/postgres/005-wordpress-guardian.sql','utf8'));
+ const pg=new PGlite();await pg.exec(await readFile('infra/postgres/001-connect.sql','utf8'));await pg.exec(await readFile('infra/postgres/004-function-sources.sql','utf8'));await pg.exec(await readFile('infra/postgres/005-wordpress-guardian.sql','utf8'));await pg.exec(await readFile('infra/postgres/010-team-delegation.sql','utf8'));await pg.exec(await readFile('infra/postgres/011-app-onboarding.sql','utf8'));
  const store={query:async(sql:string,params:unknown[]=[])=> (await pg.query(sql,params)).rows,
  transaction:async(fn:any)=>pg.transaction(async tx=>fn({query:async(sql:string,params:unknown[]=[])=>{const r=await tx.query(sql,params);return {...r,rowCount:r.affectedRows??r.rows.length};}}))} as unknown as Database;
  return {catalogs:new CatalogService(store),pg,store,admin:new AdminController(store,new CatalogService(store)),auth:new Authorization(store)};

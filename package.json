@@ -35,7 +35,9 @@
     "verify:startup": "node scripts/verify-compose-startup.mjs",
     "verify:production": "node scripts/verify-production.mjs",
     "build:runtime": "tsc -p apps/api/tsconfig.json && node scripts/build-runtime.mjs",
-    "verify:images": "node scripts/verify-runtime-images.mjs"
+    "verify:images": "node scripts/verify-runtime-images.mjs",
+    "package:sdk": "node scripts/package-sdk.mjs",
+    "test:sdk:real": "tsc -p apps/api/tsconfig.json && node scripts/check-sdk-real-provider.mjs"
   },
   "dependencies": {
     "@nestjs/common": "11.1.28",

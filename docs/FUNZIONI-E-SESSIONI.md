@@ -36,6 +36,33 @@ GET limitato a JSON, 1 MiB e 5 secondi, senza redirect né credenziali. In produ
 
 WordPress non crea utenti. Il login SSO cliente apre l’utente locale collegato e torna al sito. L’accesso amministrativo “Accedi come” richiede una selezione dall’elenco Connect, conserva i privilegi nativi e non modifica le altre sessioni dell’utente. Le sessioni WordPress aperte attraverso Connect vengono ricontrollate a ogni richiesta; le sessioni native con password rimangono indipendenti.
 
+## Amministrazione delegata della squadra
+
+Le API `/v1/team` consentono al titolare di gestire i collaboratori della propria installazione senza acquisire privilegi globali. Richiedono un token utente e `X-Installation-Id`; cliente e applicazione derivano sempre dall’installazione autenticata e non sono accettati nel corpo della richiesta.
+
+| Metodo e percorso | Operazione |
+|---|---|
+| `GET /v1/team` | Riepilogo di funzioni, delega, ruoli e utenze |
+| `GET /v1/team/users` | Utenze collegate all’installazione, con ruoli e stato della revoca |
+| `GET /v1/team/functions` | Funzioni attive e incluse nella licenza, con `delegable` |
+| `GET /v1/team/roles` | Ruoli dell’applicazione per il cliente |
+| `POST /v1/team/roles` | Crea un ruolo con un sottoinsieme della propria delega |
+| `PUT /v1/team/roles/:id` | Aggiorna nome e funzioni del ruolo |
+| `DELETE /v1/team/roles/:id` | Elimina il ruolo e le relative assegnazioni |
+| `PUT /v1/team/users/:subject/roles` | Sostituisce le assegnazioni del collaboratore |
+| `DELETE /v1/team/users/:subject` | Revoca l’accesso del collaboratore alla sola applicazione |
+| `POST /v1/team/users/:subject/restore` | Riattiva l’accesso quando esistono già ruoli assegnati |
+
+Regole applicate dal server:
+
+- Il chiamante deve poter accedere all’applicazione. Le operazioni di modifica richiedono sempre `team.manage` nella delega effettiva: un’app che non dichiara la funzione nella matrice resta in sola lettura. Per la lettura, se `team.manage` è dichiarata il chiamante deve possederla; altrimenti basta una delega effettiva non vuota.
+- Si possono creare o assegnare solo funzioni attive, acquistate e abilitate nella licenza e presenti nella delega del chiamante. Ruoli o utenti che contengono funzioni fuori dalla propria delega non sono modificabili, revocabili o rimpiazzabili, nemmeno sostituendo le assegnazioni con ruoli più limitati.
+- Non si possono concedere ruoli realm EULab Admin o tecnico, né agire su altre aziende o applicazioni. La revoca non disabilita l’identità globale e non tocca le altre app.
+- La revoca rimuove le assegnazioni della coppia cliente/applicazione e registra `app_access_revocations`. Appartenenza al cliente, collegamento locale, identità e accessi alle altre applicazioni restano invariati. `PUT` delle assegnazioni o `restore` revocano esplicitamente il blocco.
+- Le restrizioni operative dell’app, per esempio “solo i propri appuntamenti”, restano nell’app e si sommano alle autorizzazioni Connect.
+
+SDK server: `teamOverview`, `teamUsers`, `teamRoles`, `teamFunctions`, `createTeamRole`, `updateTeamRole`, `deleteTeamRole`, `setTeamUserRoles`, `revokeTeamUser`, `restoreTeamUser`. Gli stessi metodi sono disponibili nel browser SDK, sempre con il token dell’utente e senza segreti installazione.
+
 ## Sessioni SSO
 
 **Identità e accessi → Sessioni attive** mostra utente, IP, inizio, ultima attività, client SSO e sessione corrente. Si può chiudere una sessione o tutte quelle di un utente, con conferma. La ricerca filtra l’elenco e viene segnalato un eventuale limite di 500 sessioni per client SSO.

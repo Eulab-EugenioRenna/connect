@@ -36,14 +36,22 @@ export class AuthGuard implements CanActivate {
     }
     const bearer = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
     if (bearer) {
+      let verificationStage='signature';
       try {
         const { payload } = await jwtVerify(bearer,this.jwks,{ issuer:required('OIDC_ISSUER'),audience:'connect-api',algorithms:['RS256'] });
+        verificationStage='subject';
         if (!payload.sub) throw new Error('subject assente');
+        verificationStage='introspection';
         const current=await introspect(bearer);if(!current.active||current.sub!==payload.sub)throw new Error('Sessione revocata');
         p.accessToken=bearer;p.sessionId=typeof payload.sid==='string'?payload.sid:undefined;
         const roles = current.realm_access?.roles || [];
         p.subject = payload.sub; p.admin = roles.includes('eulab-admin'); p.technician = p.admin || roles.includes('eulab-technician');
-      } catch { throw new UnauthorizedException('Sessione SSO non valida'); }
+      } catch(error) {
+        const code=error&&typeof error==='object'&&'code' in error?String(error.code):'unknown';
+        const claim=error&&typeof error==='object'&&'claim' in error?String(error.claim):'unknown';
+        console.warn('[connect-token]',JSON.stringify({stage:verificationStage,code:['ERR_JWT_CLAIM_VALIDATION_FAILED','ERR_JWT_EXPIRED','ERR_JWS_SIGNATURE_VERIFICATION_FAILED','ERR_JWKS_NO_MATCHING_KEY','ERR_JWKS_TIMEOUT'].includes(code)?code:'unknown',claim:['iss','aud','exp','nbf','sub'].includes(claim)?claim:'unknown'}));
+        throw new UnauthorizedException('Sessione SSO non valida');
+      }
     }
     if (!p.subject && !p.server) throw new UnauthorizedException('Autenticazione richiesta');
     if (this.reflector.getAllAndOverride('admin',[ctx.getHandler(),ctx.getClass()]) && !p.admin) throw new ForbiddenException('Ruolo EULab Admin richiesto');

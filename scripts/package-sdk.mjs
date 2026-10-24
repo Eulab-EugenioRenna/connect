@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
+import {mkdir,readFile,writeFile,mkdtemp,rm} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {tmpdir} from 'node:os';
+import {resolve,join} from 'node:path';
+const root=resolve('.'),destination=resolve('dist/releases/sdk');await mkdir(destination,{recursive:true});
+const run=(command,args,cwd=root)=>{const r=spawnSync(command,args,{cwd,encoding:'utf8',timeout:120000});assert.equal(r.status,0,r.stderr||r.stdout);return r.stdout;};
+const output=run('npm',['pack','--json','--pack-destination',destination],resolve('packages/sdk'));
+const [record]=JSON.parse(output);assert.equal(record.name,'@eulab/connect');assert.equal(record.version,'0.10.0');
+for(const file of ['dist/application.js','dist/application.d.ts','dist/application-store.js','INTEGRATION.md','migrations/001-application-store.sql','examples/workshop/server.mjs','examples/workshop/.env.example'])assert(record.files.some(f=>f.path===file),file);
+assert(record.files.every(f=>!/(?:^|\/)(?:node_modules|\.env|\.env\.production)(?:\/|$)/.test(f.path)));
+const archive=join(destination,record.filename),sha256=createHash('sha256').update(await readFile(archive)).digest('hex');
+await writeFile(join(destination,'SHA256SUMS'),sha256+'  '+record.filename+'\n');
+const scratch=await mkdtemp(join(tmpdir(),'connect-sdk-package-'));
+try{
+ await writeFile(join(scratch,'package.json'),JSON.stringify({private:true,type:'module'}));
+ run('npm',['install','--offline','--ignore-scripts','--no-audit','--no-fund',archive],scratch);
+ await writeFile(join(scratch,'smoke.mjs'),`import assert from 'node:assert/strict';
+import {ConnectApplication,PostgresConnectApplicationStore,connectConsentVersion} from '@eulab/connect/application';
+import {ConnectOnboardingSource,ConnectServer} from '@eulab/connect/server';
+import {ConnectBrowser} from '@eulab/connect/browser';
+for(const value of [ConnectApplication,PostgresConnectApplicationStore,ConnectOnboardingSource,ConnectServer,ConnectBrowser])assert.equal(typeof value,'function');
+assert.equal(connectConsentVersion,'2026-10-21-mandatory-v1');`);
+ run(process.execPath,['smoke.mjs'],scratch);
+ await writeFile(join(scratch,'types.mts'),`import {ConnectApplication,type ConnectAccountAdapter,type BrowserContext,PostgresConnectApplicationStore} from '@eulab/connect/application';
+import {ConnectOnboardingSource,type OnboardingNextAction} from '@eulab/connect/server';
+const action:OnboardingNextAction='choose_connect_password';
+const browser:BrowserContext={origin:'https://app.test',cookies:{}};
+const appClass:typeof ConnectApplication=ConnectApplication;
+`);
+ run(process.execPath,[join(root,'node_modules/typescript/bin/tsc'),'--noEmit','--strict','--skipLibCheck','--target','ES2022','--module','NodeNext','--moduleResolution','NodeNext','types.mts'],scratch);
+}finally{await rm(scratch,{recursive:true,force:true});}
+await writeFile(join(destination,'manifest.json'),JSON.stringify({name:record.name,version:record.version,filename:record.filename,sha256,files:record.files.map(f=>f.path),verified:{offlineInstall:true,esm:true,types:true},published:false},null,2)+'\n');
+console.log('Local SDK '+record.version+': '+archive+'; ESM/types/offline install OK; not published.');

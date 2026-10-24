@@ -67,7 +67,7 @@ docker compose -f compose.yaml -f infra/compose.runner-2.yaml up -d --no-deps ru
 
 `node scripts/backup.mjs` ferma temporaneamente web, API, runner e Keycloak; esegue `pg_dump -Fc` e snapshot dei profili di ogni container runner presente nel progetto Compose, registra SHA-256, poi riavvia i servizi. Lo script individua e ferma anche i runner aggiuntivi tramite i container del progetto; il manifest elenca i volumi inclusi. Se ci sono runner su altri host, fermarli e includere i loro volumi nella stessa finestra prima di considerare coerente il backup distribuito. I file contengono dati personali e autenticazioni: directory locale privata, trasferimento cifrato e retention da configurare sul server.
 
-Il backup non copia `.env`: conservare separatamente e in modo protetto la chiave `DATA_ENCRYPTION_KEY`, le credenziali DB/Redis/Keycloak e la configurazione. Senza la stessa chiave non si possono leggere i segreti webhook e i token cifrati.
+Il backup non copia `.env`: conservare separatamente e in modo protetto la chiave `DATA_ENCRYPTION_KEY`, la chiave distinta `MIGRATION_ENCRYPTION_KEY` usata per le password transitorie di onboarding, le credenziali DB/Redis/Keycloak e la configurazione. Senza la stessa chiave non si possono leggere i segreti webhook e i token cifrati.
 
 `node scripts/restore-check.mjs backups/<snapshot>` verifica checksum e indice del dump. **Non prova un ripristino**.
 

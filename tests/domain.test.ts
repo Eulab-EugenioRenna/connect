@@ -1,14 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {decision,PolicyFacts} from '../apps/api/src/policy.js';
-import {seal,unseal,signature,verifySignature} from '../apps/api/src/security.js';
+import {seal,unseal,sealMigrationValue,unsealMigrationValue,signature,verifySignature} from '../apps/api/src/security.js';
 import {verifyWebhook} from '../packages/sdk/src/server.js';
 import {publicAddress} from '../apps/runner/src/webhooks.js';
 import {catalogSchema,messageSchema} from '../apps/api/src/validation.js';
-const valid:PolicyFacts={installationEnabled:true,identityEnabled:true,memberEnabled:true,linked:true,licenseState:'active',expiresAt:null,purchased:true,featureEnabled:true,catalogActive:true,permissionGranted:true};
+const valid:PolicyFacts={installationEnabled:true,identityEnabled:true,memberEnabled:true,linked:true,accessRevoked:false,licenseState:'active',expiresAt:null,purchased:true,featureEnabled:true,catalogActive:true,permissionGranted:true};
 test('Autorizzazione: tutti i requisiti sono necessari e le revoche prevalgono',()=>{
  assert.equal(decision(valid).allowed,true);
- for(const key of ['installationEnabled','identityEnabled','memberEnabled','linked','purchased','featureEnabled','catalogActive','permissionGranted'])assert.equal(decision({...valid,[key]:false}).allowed,false,key);
+ for(const key of ['installationEnabled','identityEnabled','memberEnabled','linked','accessRevoked','purchased','featureEnabled','catalogActive','permissionGranted'])assert.equal(decision({...valid,[key]:key==='accessRevoked'?true:false}).allowed,false,key);
+ assert.equal(decision({...valid,accessRevoked:true}).reason,'access_revoked');
  assert.equal(decision({...valid,licenseState:'suspended'}).allowed,false);
  assert.equal(decision({...valid,expiresAt:new Date(0)}).reason,'license_expired');
 });
@@ -32,6 +33,10 @@ test('Webhook: indirizzi privati e locali sono bloccati',()=>{
 test('Segreti: cifratura autenticata e chiavi errate',()=>{
  process.env.DATA_ENCRYPTION_KEY='a'.repeat(64);const cipher=seal('riservato');assert(!cipher.includes('riservato'));assert.equal(unseal(cipher),'riservato');
  process.env.DATA_ENCRYPTION_KEY='b'.repeat(64);assert.throws(()=>unseal(cipher));process.env.DATA_ENCRYPTION_KEY='a'.repeat(64);
+ const legacy=seal('compatibile');process.env.DATA_ENCRYPTION_KEY='a'.repeat(64);assert.equal(unseal(legacy),'compatibile');
+ process.env.MIGRATION_ENCRYPTION_KEY='c'.repeat(64);const migration=sealMigrationValue('transitoria','request-1');
+ assert.equal(unsealMigrationValue(migration,'request-1'),'transitoria');assert.throws(()=>unsealMigrationValue(migration,'request-2'));
+ process.env.MIGRATION_ENCRYPTION_KEY='corta';assert.throws(()=>sealMigrationValue('transitoria','request-1'));process.env.MIGRATION_ENCRYPTION_KEY='c'.repeat(64);
 });
 
 test('Media WhatsApp: il MIME deve corrispondere al tipo scelto',()=>{

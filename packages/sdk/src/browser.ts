@@ -3,8 +3,8 @@ export type {IVRInput,IVRPrompt,IVRChannel,VoiceIVRSession} from './bot.js';
 export type {WhatsAppRealtimeEvent,WhatsAppSnapshot,WhatsAppRealtimeStatus,WhatsAppSubscribeOptions,WhatsAppSubscription} from './realtime.js';
 export type {WhatsAppBotDefinition,WhatsAppBotNode,WhatsAppBotState,WhatsAppBotTurn,WhatsAppBot} from './bot.js';
 export {defineFunctions,functionsResponse,functionCatalogPath} from './functions.js';
-export type {AppFunction,FunctionMatrix,AccessResult,ConnectUser} from './functions.js';
-import type {AccessResult,ConnectUser} from './functions.js';
+export type {AppFunction,FunctionMatrix,AccessResult,ConnectUser,TeamFunction,TeamRole,TeamUser,TeamOverview,TeamRoleInput,TeamUserAssignment,TeamRevocation,TeamRestore} from './functions.js';
+import type {AccessResult,ConnectUser,TeamFunction,TeamOverview,TeamRole,TeamRoleInput,TeamUser,TeamUserAssignment,TeamRevocation,TeamRestore} from './functions.js';
 import {whatsappClient} from './whatsapp.js';
 export type {WhatsAppSession,WhatsAppArchive,Conversation,WhatsAppMessage,WhatsAppPayload} from './whatsapp.js';
 export interface BrowserConfig {apiUrl:string;installationId?:string;issuer:string;clientId:string;redirectUri:string;functionFallbackUrl?:string}
@@ -64,6 +64,16 @@ export class ConnectBrowser {
  can(functionKey:string){return !!this.accessState?.canLogin&&this.accessState.functions.some(f=>f.key===functionKey);}
  async permissions(){const result=await this.request<AccessResult>('/v1/access');this.accessState=result;return result;}
  users(){return this.request<ConnectUser[]>('/v1/users');}
+ teamOverview(){return this.request<TeamOverview>('/v1/team');}
+ teamUsers(){return this.request<TeamUser[]>('/v1/team/users');}
+ teamRoles(){return this.request<TeamRole[]>('/v1/team/roles');}
+ teamFunctions(){return this.request<TeamFunction[]>('/v1/team/functions');}
+ createTeamRole(role:TeamRoleInput){return this.request<TeamRole>('/v1/team/roles','POST',role);}
+ updateTeamRole(id:string,role:TeamRoleInput){return this.request<TeamRole>('/v1/team/roles/'+encodeURIComponent(id),'PUT',role);}
+ deleteTeamRole(id:string){return this.request<{removed:boolean}>('/v1/team/roles/'+encodeURIComponent(id),'DELETE');}
+ setTeamUserRoles(subject:string,roleIds:string[]){return this.request<TeamUserAssignment>('/v1/team/users/'+encodeURIComponent(subject)+'/roles','PUT',{roleIds});}
+ revokeTeamUser(subject:string){return this.request<TeamRevocation>('/v1/team/users/'+encodeURIComponent(subject),'DELETE');}
+ restoreTeamUser(subject:string){return this.request<TeamRestore>('/v1/team/users/'+encodeURIComponent(subject)+'/restore','POST');}
  watchAccess(onChange:(access:AccessResult|null)=>void,intervalMs=30000){const refresh=async()=>{try{if(!await this.checkSession()){this.accessState=null;onChange(null);return;}onChange(await this.permissions());}catch{this.accessState=null;onChange(null);}};const timer=setInterval(()=>void refresh(),Math.max(intervalMs,5000));return()=>clearInterval(timer);}
  watchSession(onChange:(valid:boolean|null)=>void,intervalMs=30000){const check=async()=>{try{onChange(await this.checkSession());}catch{onChange(null);}};const timer=setInterval(()=>void check(),Math.max(intervalMs,5000));return()=>clearInterval(timer);}
  get authenticated(){return !!this.token;}

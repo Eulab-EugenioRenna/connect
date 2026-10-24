@@ -12,7 +12,7 @@ const source=await readFile(file,'utf8'),env=parseEnv(source);
 const keys=source.split('\n').map(l=>l.match(/^([A-Z][A-Z0-9_]*)=/)?.[1]).filter(Boolean);
 assert.equal(keys.length,new Set(keys).size,'Variabili duplicate nel file produzione');
 assert.equal((await stat(file)).mode&0o777,0o600,'Usare chmod 600 .env.production');
-for(const key of ['POSTGRES_PASSWORD','REDIS_PASSWORD','DATA_ENCRYPTION_KEY','OIDC_CLIENT_SECRET','OIDC_IDENTITY_ADMIN_SECRET','KEYCLOAK_ADMIN_PASSWORD','EULAB_ADMIN_PASSWORD'])assert(/^[a-fA-F0-9]{64}$/.test(env[key]||''),`${key}: richiesto un segreto casuale di 32 byte in esadecimale`);
+for(const key of ['POSTGRES_PASSWORD','REDIS_PASSWORD','DATA_ENCRYPTION_KEY','MIGRATION_ENCRYPTION_KEY','OIDC_CLIENT_SECRET','OIDC_IDENTITY_ADMIN_SECRET','KEYCLOAK_ADMIN_PASSWORD','EULAB_ADMIN_PASSWORD'])assert(/^[a-fA-F0-9]{64}$/.test(env[key]||''),`${key}: richiesto un segreto casuale di 32 byte in esadecimale`);
 assert.equal(env.PUBLIC_CONNECT_URL,'https://auth.eulab.cloud','Il deployment corrente è configurato per auth.eulab.cloud');
 assert.equal(env.PUBLIC_OIDC_ISSUER,env.PUBLIC_CONNECT_URL+'/sso/realms/eulab','Issuer produzione non coerente');
 assert(isIP(env.CONNECT_BIND_IP),'CONNECT_BIND_IP deve essere un indirizzo IP');

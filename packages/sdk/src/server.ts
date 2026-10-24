@@ -3,18 +3,93 @@ export type {IVRInput,IVRPrompt,IVRChannel,VoiceIVRSession} from './bot.js';
 export type {WhatsAppRealtimeEvent,WhatsAppSnapshot,WhatsAppRealtimeStatus,WhatsAppSubscribeOptions,WhatsAppSubscription} from './realtime.js';
 export type {WhatsAppBotDefinition,WhatsAppBotNode,WhatsAppBotState,WhatsAppBotTurn,WhatsAppBot} from './bot.js';
 export {defineFunctions,functionsResponse,functionCatalogPath} from './functions.js';
-export type {AppFunction,FunctionMatrix,AccessResult,ConnectUser} from './functions.js';
-import type {AccessResult,ConnectUser} from './functions.js';
+export type {AppFunction,FunctionMatrix,AccessResult,ConnectUser,TeamFunction,TeamRole,TeamUser,TeamOverview,TeamRoleInput,TeamUserAssignment,TeamRevocation,TeamRestore} from './functions.js';
+import type {AccessResult,ConnectUser,TeamFunction,TeamOverview,TeamRole,TeamRoleInput,TeamUser,TeamUserAssignment,TeamRevocation,TeamRestore} from './functions.js';
 import {functionCatalogPath} from './functions.js';
 import {whatsappClient} from './whatsapp.js';
 export type {WhatsAppSession,WhatsAppArchive,Conversation,WhatsAppMessage,WhatsAppPayload} from './whatsapp.js';
 import { createHmac,timingSafeEqual } from 'node:crypto';
-export interface LocalUserProfile {localUserId:string;username:string;email:string;displayName:string}
+export interface LocalUserProfile {localUserId:string;username:string;email:string;displayName:string;
+ // Password verificata localmente poco prima della chiamata. Serve solo a inizializzare una nuova identità:
+ // Connect la inoltra al provider nella richiesta di creazione e non la conserva.
+ initialPassword?:string}
 export interface MirroredUser {installationId:string;customerId:string;localUserId:string;subject:string;username?:string;created:boolean;status:'created'|'already_linked'|'recovered';ssoSetupRequired:boolean|null}
+export type OnboardingRequestState='pending'|'approved'|'migrating'|'completed'|'rejected'|'expired'|'failed';
+export type OnboardingNextAction='wait'|'sign_in'|'choose_connect_password'|'resubmit'|'contact_admin'|'closed';
+export interface OnboardingRequestStatus {requestId:string;state:OnboardingRequestState;nextAction?:OnboardingNextAction}
+export interface OnboardingPasswordRecovery {requestId:string;localTenantId:string;localUserId:string;email:string;consentVersion:string;newPassword:string}
+
+export interface AuthorizedConnectContext {
+ tenant:{id:string;name:string;slug:string};
+ binding:{customerId:string;installationId:string;secret:string};
+ user:{id:string;subject:string;email:string;firstName:string;lastName:string;role:'owner'|'manager'|'reception'|'collaborator';permissions:string[]};
+}
+export interface ApprovedApplicationConfiguration {sourceId:string;appId:string;issuer:string;clientId:string;redirectUri:string;clientSecret?:string}
+export interface DeploymentMetadata {name:string;environment:'development'|'staging'|'production';origins:string[];catalogUrl?:string;oidcCallbacks?:string[]}
+export type AppOnboardingLoginContext={status:'configuration_required';appId:string;context:AuthorizedConnectContext}|{status:'connect';context:AuthorizedConnectContext}|{status:'not_found';request?:OnboardingRequestStatus};
+export interface AppOnboardingMigrationRequest {
+ kind:'migration';
+ consentVersion:string;
+ localTenant:{id:string;name:string;slug:string};
+ localUser:{id:string;email:string;firstName:string;lastName:string;role:'owner'|'manager'|'reception'|'collaborator';permissions:string[]};
+ /** Password verificata localmente: transito cifrato a TTL, mai restituita o registrata in chiaro. */
+ initialPassword:string;
+}
+export interface AppOnboardingActivationRequest {
+ kind:'activation';
+ companyName:string;
+ applicant:{email:string;firstName:string;lastName:string};
+ initialPassword:string;
+}
+export type AppOnboardingRequest=AppOnboardingMigrationRequest|AppOnboardingActivationRequest;
+/** Errore del contratto sorgente: lo stato HTTP resta disponibile al chiamante. */
+export class ConnectOnboardingError extends Error {
+ constructor(readonly status:number,message:string){super(message);this.name='ConnectOnboardingError';}
+}
+/**
+ * Client backend della sorgente/deployment per l'onboarding assistito.
+ * Non va usato nel browser: il segreto bootstrap resta sul server della sorgente.
+ * `submit` non sostituisce mai una credenziale già acquisita con la stessa chiave.
+ */
+export class ConnectOnboardingSource {
+ constructor(private readonly config:{apiUrl:string;sourceId:string;appId:string;secret:string;presenterId?:string;deployment?:DeploymentMetadata}){}
+ private async post<T>(path:string,body:Record<string,unknown>,idempotencyKey?:string):Promise<T>{
+  const url=new URL('/v1/app-onboarding/'+path,this.config.apiUrl);
+  const response=await fetch(url,{method:'POST',redirect:'error',signal:AbortSignal.timeout(10000),
+   headers:{'Content-Type':'application/json',Authorization:'Bearer '+this.config.secret,'X-Connect-Source':this.config.sourceId,...(this.config.presenterId?{'X-Connect-Presenter':this.config.presenterId}:{}),
+    ...(idempotencyKey?{'Idempotency-Key':idempotencyKey}:{})},
+   body:JSON.stringify({schemaVersion:1,appId:this.config.appId,sourceId:this.config.sourceId,...(this.config.deployment?{deployment:this.config.deployment}:{}),...body})});
+  const text=await response.text();
+  let result:any=null;try{result=text?JSON.parse(text):null;}catch{result=null;}
+  if(!response.ok)throw new ConnectOnboardingError(response.status,`Connect onboarding ${response.status}`);
+  if(!result||typeof result!=='object')throw new ConnectOnboardingError(response.status,'Risposta onboarding non valida');
+  return result as T;
+ }
+ private status(value:OnboardingRequestStatus):OnboardingRequestStatus{
+  if(!value||typeof value.requestId!=='string'||!['pending','approved','migrating','completed','rejected','expired','failed'].includes(value.state))throw new ConnectOnboardingError(502,'Risposta onboarding non valida');
+  const known=['wait','sign_in','choose_connect_password','resubmit','contact_admin','closed'];
+  return {requestId:value.requestId,state:value.state,...(value.nextAction?{nextAction:known.includes(value.nextAction)?value.nextAction:'contact_admin' as const}:{})};
+ }
+ configuration(){return this.post<{status:'pending'|'configuration_required';plannedAppId?:string}|{status:'ready';configuration:ApprovedApplicationConfiguration}>('configuration',{});}
+ async recoverPassword(input:OnboardingPasswordRecovery,idempotencyKey:string){return this.status(await this.post<OnboardingRequestStatus>('password-recovery',input as unknown as Record<string,unknown>,idempotencyKey));}
+ async loginContext(email:string):Promise<AppOnboardingLoginContext>{
+  const value=await this.post<AppOnboardingLoginContext>('login-context',{email});
+  if(value.status==='not_found')return {status:'not_found',...(value.request?{request:this.status(value.request)}:{})};
+  if(value.status==='connect'||value.status==='configuration_required'){
+   const c=value.context,strings=(v:unknown[])=>v.every(x=>typeof x==='string'&&x.length>0);
+   if(c?.tenant&&c?.binding&&c?.user&&strings([c.tenant.id,c.tenant.name,c.tenant.slug,c.binding.customerId,c.binding.installationId,c.binding.secret,c.user.id,c.user.subject,c.user.email])&&typeof c.user.firstName==='string'&&typeof c.user.lastName==='string'&&['owner','manager','reception','collaborator'].includes(c.user.role)&&Array.isArray(c.user.permissions)&&c.user.permissions.every(p=>typeof p==='string'))return value;
+  }
+  throw new ConnectOnboardingError(502,'Risposta onboarding non valida');
+ }
+ async submit(request:AppOnboardingRequest,idempotencyKey:string){
+  if(!idempotencyKey||idempotencyKey.length<8||idempotencyKey.length>200)throw new Error('Idempotency-Key non valida');
+  return this.status(await this.post<OnboardingRequestStatus>('requests',request as unknown as Record<string,unknown>,idempotencyKey));
+ }
+}
 export class ConnectServer {
- constructor(private readonly config:{apiUrl:string;installationId:string;secret:string;domain?:string;functionFallbackUrl?:string;catalogUrl?:string;basePath?:string}){}
+ constructor(private readonly config:{apiUrl:string;installationId:string;secret:string;domain?:string;functionFallbackUrl?:string;catalogUrl?:string;basePath?:string;requestTimeoutMs?:number}){}
  async request<T=any>(path:string,method='GET',body?:unknown,accessToken?:string,extra:Record<string,string>={}):Promise<T>{
-  const response=await fetch(`${this.config.apiUrl}${path}`,{method,headers:{'Content-Type':'application/json','X-Installation-Id':this.config.installationId,'X-Installation-Secret':this.config.secret,...(accessToken?{Authorization:`Bearer ${accessToken}`} : {}),...extra},body:body===undefined?undefined:JSON.stringify(body)});
+  const response=await fetch(`${this.config.apiUrl}${path}`,{method,...(this.config.requestTimeoutMs?{signal:AbortSignal.timeout(this.config.requestTimeoutMs),redirect:'error' as const}:{}),headers:{'Content-Type':'application/json','X-Installation-Id':this.config.installationId,'X-Installation-Secret':this.config.secret,...(accessToken?{Authorization:`Bearer ${accessToken}`} : {}),...extra},body:body===undefined?undefined:JSON.stringify(body)});
   const result=await response.json();if(!response.ok)throw new Error(`Connect ${response.status}: ${JSON.stringify(result)}`);return result;
  }
  functionUrl(feature:string,path?:string){
@@ -25,7 +100,25 @@ export class ConnectServer {
  authorize(accessToken:string,permission:string){return this.request<{allowed:boolean;reason:string}>('/v1/authorize','POST',{installationId:this.config.installationId,permission},accessToken);}
  whatsapp(accessToken:string|(()=>Promise<string>)){return whatsappClient(async(path,method,body,extra)=>this.request(path,method,body,typeof accessToken==='function'?await accessToken():accessToken,extra),this.config.installationId,{apiUrl:this.config.apiUrl});}
  registerFunctions(url?:string){const source=url||this.config.catalogUrl||(this.config.domain?this.config.domain+(this.config.basePath||'')+functionCatalogPath:undefined);if(!source)throw new Error('URL funzioni o dominio richiesto');return this.request('/v1/catalog-source','POST',{url:source});}
+ /**
+  * Crea o recupera l'identità centrale collegata all'utente locale.
+  *
+  * `initialPassword` deve provenire da una verifica locale appena conclusa e viene usata
+  * soltanto per inizializzare una nuova identità nel provider. Non viene conservata da
+  * Connect, non compare nelle risposte e non viene applicata a identità già esistenti.
+  * Le chiamate esistenti senza il campo mantengono il comportamento precedente.
+  */
  mirrorUser(user:LocalUserProfile){return this.request<MirroredUser>('/v1/users/mirror','POST',user);}
+ teamOverview(accessToken:string){return this.request<TeamOverview>('/v1/team','GET',undefined,accessToken);}
+ teamUsers(accessToken:string){return this.request<TeamUser[]>('/v1/team/users','GET',undefined,accessToken);}
+ teamRoles(accessToken:string){return this.request<TeamRole[]>('/v1/team/roles','GET',undefined,accessToken);}
+ teamFunctions(accessToken:string){return this.request<TeamFunction[]>('/v1/team/functions','GET',undefined,accessToken);}
+ createTeamRole(accessToken:string,role:TeamRoleInput){return this.request<TeamRole>('/v1/team/roles','POST',role,accessToken);}
+ updateTeamRole(accessToken:string,id:string,role:TeamRoleInput){return this.request<TeamRole>('/v1/team/roles/'+encodeURIComponent(id),'PUT',role,accessToken);}
+ deleteTeamRole(accessToken:string,id:string){return this.request<{removed:boolean}>('/v1/team/roles/'+encodeURIComponent(id),'DELETE',undefined,accessToken);}
+ setTeamUserRoles(accessToken:string,subject:string,roleIds:string[]){return this.request<TeamUserAssignment>('/v1/team/users/'+encodeURIComponent(subject)+'/roles','PUT',{roleIds},accessToken);}
+ revokeTeamUser(accessToken:string,subject:string){return this.request<TeamRevocation>('/v1/team/users/'+encodeURIComponent(subject),'DELETE',undefined,accessToken);}
+ restoreTeamUser(accessToken:string,subject:string){return this.request<TeamRestore>('/v1/team/users/'+encodeURIComponent(subject)+'/restore','POST',undefined,accessToken);}
  permissions(accessToken:string){return this.request<AccessResult>('/v1/access','GET',undefined,accessToken);}
  notifications(accessToken:string,options:{unread?:boolean;before?:string;beforeId?:string;limit?:number}={}){const query=new URLSearchParams();for(const [key,value] of Object.entries(options))if(value!==undefined)query.set(key,String(value));return this.request('/v1/notifications?'+query,'GET',undefined,accessToken);}
  markNotification(accessToken:string,id:string,read=true){return this.request('/v1/notifications/'+encodeURIComponent(id)+'/read','PUT',{read},accessToken);}

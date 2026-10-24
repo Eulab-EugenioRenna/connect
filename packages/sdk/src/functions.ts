@@ -3,6 +3,14 @@ export interface AppFunction {key:string;name:string;description?:string}
 export interface FunctionMatrix {schemaVersion:1;appId:string;version:number;functions:AppFunction[]}
 export interface AccessResult {installationId:string;appId:string|null;subject:string|null;localUserId:string|null;canLogin:boolean;reason:string;functions:AppFunction[];catalogVersion:number;functionsStatus:'pending'|'last_valid'|'ready'}
 export interface ConnectUser {subject:string;localUserId:string;displayName:string;roles:{id:string;name:string}[]}
+export interface TeamFunction {key:string;name:string;delegable:boolean}
+export interface TeamRole {id:string;name:string;permissions:string[]}
+export interface TeamUser {subject:string;localUserId:string;displayName:string;identityEnabled:boolean;membershipEnabled:boolean;accessRevoked:boolean;roles:{id:string;name:string}[]}
+export interface TeamOverview {installationId:string;customerId:string;appId:string;canManage:boolean;functions:TeamFunction[];delegation:{key:string;name:string}[];roles:TeamRole[];users:TeamUser[]}
+export interface TeamRoleInput {name:string;permissions:string[]}
+export interface TeamUserAssignment {subject:string;localUserId:string;roleIds:string[];accessRestored:boolean}
+export interface TeamRevocation {revoked:boolean;subject:string;localUserId:string;identityPreserved:boolean;membershipPreserved:boolean;otherApplicationsPreserved:boolean}
+export interface TeamRestore {restored:boolean;subject:string;localUserId:string}
 export function defineFunctions(input:Omit<FunctionMatrix,'schemaVersion'>):FunctionMatrix{
  const validKey=(key:string)=>/^[a-z][a-z0-9_.:-]{0,79}$/.test(key);
  if(!validKey(input.appId)||!Number.isSafeInteger(input.version)||input.version<1||input.functions.length>200||new Set(input.functions.map(f=>f.key)).size!==input.functions.length||input.functions.some(f=>!validKey(f.key)||!f.name.trim()||f.name.length>200||(f.description?.length||0)>1000))throw new Error('Matrice funzioni non valida');

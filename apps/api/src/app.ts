@@ -7,6 +7,9 @@ import {MailService} from './mail.service.js';
 import {NotificationsController} from './notifications.controller.js';
 import {AccountSecurityController} from './account-security.controller.js';
 import {UserMirrorsController} from './user-mirrors.controller.js';
+import {TeamController} from './team.controller.js';
+import {OnboardingService} from './onboarding.service.js';
+import {AppOnboardingController,OnboardingAdminController} from './onboarding.controller.js';
 import {GuardianController} from './guardian.controller.js';
 import {SessionsController} from './sessions.controller.js';
 import {SessionsService} from './sessions.service.js';
@@ -38,11 +41,11 @@ import { WhatsAppController } from './whatsapp.controller.js';
  const status=error.code==='23505'?409:['23503','23514','22P02'].includes(error.code)?400:500;
  if(status===500)console.error('Errore interno',error.code||error.name);res.status(status).json({statusCode:status,message:status===409?'Record già presente':status===400?'Relazione o dato non valido':'Errore interno'});}
 }
-@Module({controllers:[WhatsAppOperationsController,WhatsAppRealtimeController,WhatsAppBotController,NotificationsController,AccountSecurityController,UserMirrorsController,GuardianController,SessionsController,FunctionsController,WordPressController,SsoController,HealthController,IdentitiesController,AdminController,ConnectorsController,WhatsAppController],providers:[WhatsAppRealtimeService,WhatsAppBotService,MailService,SessionsService,CatalogSourceService,CatalogReader,Database,IdentitiesService,Authorization,CatalogService,WhatsAppService,{provide:APP_GUARD,useClass:AuthGuard},{provide:APP_FILTER,useClass:Errors}]}) export class AppModule {}
+@Module({controllers:[WhatsAppOperationsController,WhatsAppRealtimeController,WhatsAppBotController,NotificationsController,AccountSecurityController,UserMirrorsController,TeamController,GuardianController,SessionsController,FunctionsController,WordPressController,SsoController,HealthController,IdentitiesController,AdminController,ConnectorsController,WhatsAppController,AppOnboardingController,OnboardingAdminController],providers:[WhatsAppRealtimeService,WhatsAppBotService,MailService,SessionsService,CatalogSourceService,CatalogReader,Database,IdentitiesService,Authorization,CatalogService,WhatsAppService,OnboardingService,{provide:APP_GUARD,useClass:AuthGuard},{provide:APP_FILTER,useClass:Errors}]}) export class AppModule {}
 export async function configureApp(app:any){
 // Express defaults would reject supported media payloads; explicit bounded parser.
 const express=await import('express');app.use(express.json({limit:'15mb'}));
-app.enableCors({origin:true,credentials:false,allowedHeaders:['Authorization','Content-Type','X-Installation-Id','X-Installation-Secret','Idempotency-Key']});
+app.enableCors({origin:true,credentials:false,allowedHeaders:['Authorization','Content-Type','X-Installation-Id','X-Installation-Secret','X-Connect-Source','Idempotency-Key']});
 app.use((_req:any,res:any,next:()=>void)=>{res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');next();});
 app.enableShutdownHooks();
 app.get(WhatsAppRealtimeService).attach(app.getHttpServer());

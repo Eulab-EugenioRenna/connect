@@ -25,7 +25,7 @@ function scan(dir){for(const entry of readdirSync(dir,{withFileTypes:true})){
 scan('/connect/node_modules');
 const require=createRequire('/connect/check.mjs');
 for(const name of ['typescript','tsx','esbuild','vite','@playwright/test','react','react-dom'])assert.throws(()=>require.resolve(name),name);
-if(target==='migrate')assert(existsSync('/connect/infra/postgres/009-whatsapp-unlocked.sql'));
+if(target==='migrate'){assert(existsSync('/connect/infra/postgres/010-team-delegation.sql'));assert(existsSync('/connect/infra/postgres/011-app-onboarding.sql'));}
 else assert(!existsSync('/connect/infra'));
 if(target==='runner'){
  scan('/opt/openwa/node_modules');

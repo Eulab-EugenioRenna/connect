@@ -1,12 +1,14 @@
-import {Injectable,ConflictException,ForbiddenException,NotFoundException,ServiceUnavailableException} from '@nestjs/common';
+import {Injectable,BadRequestException,ConflictException,ForbiddenException,NotFoundException,ServiceUnavailableException} from '@nestjs/common';
 import {Database,audit} from './database.js';
 import {required} from './config.js';
 export interface ManagedIdentity {subject:string;username:string;email:string;display_name:string;enabled:boolean;user_type:'admin'|'client'}
+/** Il provider ha rifiutato la password in creazione (policy locale). */
+export class ProviderPasswordRejected extends Error {}
 @Injectable()
 export class IdentitiesService {
  private token?:{value:string;expires:number};
  constructor(private readonly db:Database){}
- async request(path:string,method='GET',body?:unknown):Promise<{body:any;location:string|null}>{
+ async request(path:string,method='GET',body?:unknown,invalidInputMessage='Richiesta non valida per il servizio identità'):Promise<{body:any;location:string|null}>{
   const issuer=required('OIDC_INTERNAL_ISSUER');const secret=process.env.OIDC_IDENTITY_ADMIN_SECRET;
   if(!secret)throw new ServiceUnavailableException('Configura il servizio identità con scripts/setup-admin.mjs');
   if(!this.token||this.token.expires<Date.now()){
@@ -16,17 +18,53 @@ export class IdentitiesService {
   const url=issuer.replace('/realms/','/admin/realms/')+path;
   const r=await fetch(url,{method,headers:{Authorization:`Bearer ${this.token.value}`,'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(5000)});
   if(r.status===409)throw new ConflictException('Username o email già presente: collega esplicitamente l’identità esistente');
+  if(r.status===400)throw new BadRequestException(invalidInputMessage);
   if(r.status===404)throw new NotFoundException('Identità SSO non trovata');
   if(!r.ok)throw new ServiceUnavailableException(`Operazione identità SSO non riuscita (${r.status})`);
   const text=await r.text();return {body:text?JSON.parse(text):null,location:r.headers.get('location')};
  }
- private async roles(subject:string){return (await this.request(`/users/${encodeURIComponent(subject)}/role-mappings/realm/composite`)).body as {id:string;name:string}[];}
+ async roles(subject:string){return (await this.request(`/users/${encodeURIComponent(subject)}/role-mappings/realm/composite`)).body as {id:string;name:string}[];}
  private async representation(user:any):Promise<ManagedIdentity>{
   const roles=await this.roles(user.id);return {subject:user.id,username:user.username,email:user.email||'',display_name:[user.firstName,user.lastName].filter(Boolean).join(' ')||user.username,enabled:user.enabled,user_type:roles.some(r=>r.name==='eulab-admin')?'admin':'client'};
  }
  async list(){
   const users=(await this.request('/users?max=1000&briefRepresentation=false')).body as any[];
   const result:ManagedIdentity[]=[];for(const user of users){if(!user.serviceAccountClientId&&!user.username.startsWith('service-account-'))result.push(await this.representation(user));}return result;
+ }
+ async findUserByEmail(email:string):Promise<any|null>{
+  const users=(await this.request('/users?'+new URLSearchParams({email,exact:'true',max:'2',briefRepresentation:'false'}))).body as any[];
+  return users.find(u=>String(u.email||'').toLowerCase()===email.toLowerCase())||null;
+ }
+ async findUserByUsername(username:string):Promise<any|null>{
+  const users=(await this.request('/users?'+new URLSearchParams({username,exact:'true',max:'2',briefRepresentation:'false'}))).body as any[];
+  return users.find(u=>String(u.username||'').toLowerCase()===username.toLowerCase())||null;
+ }
+ async user(subject:string):Promise<any>{return (await this.request('/users/'+encodeURIComponent(subject))).body;}
+ /**
+  * Crea l'identità di una pratica di onboarding. Se la risposta del provider e'
+  * andata persa, la ripetizione recupera soltanto l'identità marcata con la
+  * stessa pratica: nessuna unione per email e nessun reset di credenziali.
+  */
+ async createOnboardingUser(input:{requestId:string;sourceId:string;email:string;firstName:string;lastName:string;password:string}):Promise<{subject:string;user:any;recovered:boolean}>{
+  const username=input.email.toLowerCase();
+  const proof=[input.requestId];
+  const payload:any={username,email:input.email,firstName:input.firstName,lastName:input.lastName,enabled:true,emailVerified:false,
+   attributes:{eulab_onboarding_request:proof,eulab_onboarding_source:[input.sourceId]},
+   credentials:[{type:'password',value:input.password,temporary:false}],requiredActions:[]};
+  let created:any;
+  try{created=await this.request('/users','POST',payload,'La password non rispetta la policy del provider identità');}
+  catch(error){
+   if(error instanceof ConflictException){
+    const existing=await this.findUserByUsername(username);
+    if(existing&&Array.isArray(existing.attributes?.eulab_onboarding_request)&&existing.attributes.eulab_onboarding_request.includes(input.requestId))return {subject:existing.id,user:existing,recovered:true};
+    throw new ConflictException('Identità SSO già presente: serve un collegamento esplicito dell’amministratore. Nessuna unione automatica per email.');
+   }
+   if(error instanceof BadRequestException)throw new ProviderPasswordRejected('La password non rispetta la policy del provider identità');
+   throw error;
+  }
+  const subject=created.location?.split('/').pop();
+  if(!subject)throw new ServiceUnavailableException('Identità creata: ripeti la richiesta per completare il collegamento');
+  return {subject,user:(await this.request('/users/'+encodeURIComponent(subject))).body,recovered:false};
  }
  async create(b:{username:string;email:string;displayName:string;userType:'admin'|'client';password:string;temporaryPassword:boolean},actor:string){
   await this.db.transaction(tx=>audit(tx,actor,'identity.sso.create.requested',b.username,{username:b.username,userType:b.userType}));
@@ -48,7 +86,7 @@ export class IdentitiesService {
   await this.db.transaction(tx=>audit(tx,actor,'identity.sso.delete.requested',subject));
   await this.request(`/users/${encodeURIComponent(subject)}/logout`,'POST');
   await this.request(`/users/${encodeURIComponent(subject)}`,'DELETE');
-  await this.db.transaction(async tx=>{for(const table of ['notifications','assignments','local_links','memberships','identities'])await tx.query(`DELETE FROM ${table} WHERE subject=$1`,[subject]);await audit(tx,actor,'identity.sso.delete',subject);});
+  await this.db.transaction(async tx=>{for(const table of ['notifications','assignments','app_access_revocations','local_links','app_local_users','memberships','identities'])await tx.query(`DELETE FROM ${table} WHERE subject=$1`,[subject]);await audit(tx,actor,'identity.sso.delete',subject);});
   return {removed:true};
  }
  async update(subject:string,b:{displayName:string;email:string;enabled:boolean;userType:'admin'|'client'},actor:string){

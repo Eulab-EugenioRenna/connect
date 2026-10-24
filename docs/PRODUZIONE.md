@@ -92,7 +92,7 @@ npm run deploy:production -- --apply
 
 `deploy:production` senza flag esegue solo il preflight: verifica segreti, origine/issuer, Docker, isolamento dei servizi, volumi e configurazione di produzione. Non richiede `.env` di sviluppo. Se NPM risiede sulla stessa macchina e comunica via loopback, aggiungere `--local-ingress` sia al controllo sia all’avvio. Il flag deve corrispondere alla topologia reale; non serve per un NPM remoto.
 
-`--apply` costruisce le immagini dai sorgenti e lockfile, attende PostgreSQL/Redis, esegue le migrazioni 001–009 e avvia i servizi dopo il bootstrap amministratore/servizio identità automatico. Non azzera database o volumi e non associa un numero WhatsApp. Completare quindi la configurazione SMTP e sicurezza e le verifiche pubbliche. Per un aggiornamento fare prima un backup coerente di database e volumi usando la configurazione di produzione e conservare separatamente la chiave; non eseguire gli script di backup/ripristino locali sul progetto di produzione senza verificarne il contesto Compose.
+`--apply` costruisce le immagini dai sorgenti e lockfile, attende PostgreSQL/Redis, esegue le migrazioni 001–011 e avvia i servizi dopo il bootstrap amministratore/servizio identità automatico. Non azzera database o volumi e non associa un numero WhatsApp. Completare quindi la configurazione SMTP e sicurezza e le verifiche pubbliche. Per un aggiornamento fare prima un backup coerente di database e volumi usando la configurazione di produzione e conservare separatamente la chiave; non eseguire gli script di backup/ripristino locali sul progetto di produzione senza verificarne il contesto Compose.
 
 ## Accettazione prima dell’apertura agli utenti
 

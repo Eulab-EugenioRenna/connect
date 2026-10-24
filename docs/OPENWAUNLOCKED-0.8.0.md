@@ -61,7 +61,7 @@ Le operazioni ricontrollano token, permessi, installazione, connessione e lease 
 
 ## Installazione e verifiche
 
-Applicare le migrazioni 001–009 prima di distribuire API/runner. La 009 aggiunge contatti, operazioni provider e sessioni IVR; non modifica identità, archivi o messaggi esistenti. Conservare `DATA_ENCRYPTION_KEY` e volumi. Il nuovo checkpoint è separato dai profili 5.6.6 e richiede un nuovo pairing QR.
+Applicare le migrazioni 001–010 prima di distribuire API/runner. La 009 aggiunge contatti, operazioni provider e sessioni IVR; la 010 aggiunge la revoca dell’accesso a una singola applicazione. Nessuna delle due modifica identità, archivi o messaggi esistenti. Conservare `DATA_ENCRYPTION_KEY` e volumi. Il nuovo checkpoint è separato dai profili 5.6.6 e richiede un nuovo pairing QR.
 
 Verifiche automatiche: `npm test`, `npm run build`, `npm run infra:check`, `npm run env:check`. `npm run verify:whatsapp` usa API e database isolati: non invia su WhatsApp. Su host senza Chromium compatibile eseguirlo nell’immagine runner montando il sorgente e impostando `CHROMIUM_PATH=/usr/bin/chromium`.
 

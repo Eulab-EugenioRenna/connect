@@ -2,7 +2,7 @@ import {readFile,stat} from 'node:fs/promises';
 import {parseEnv} from 'node:util';
 import {spawnSync} from 'node:child_process';
 import assert from 'node:assert/strict';
-const required=['POSTGRES_PASSWORD','REDIS_PASSWORD','DATA_ENCRYPTION_KEY','OIDC_CLIENT_SECRET','OIDC_IDENTITY_ADMIN_SECRET','KEYCLOAK_ADMIN_PASSWORD','EULAB_ADMIN_PASSWORD'];
+const required=['POSTGRES_PASSWORD','REDIS_PASSWORD','DATA_ENCRYPTION_KEY','MIGRATION_ENCRYPTION_KEY','OIDC_CLIENT_SECRET','OIDC_IDENTITY_ADMIN_SECRET','KEYCLOAK_ADMIN_PASSWORD','EULAB_ADMIN_PASSWORD'];
 const smtp=['SMTP_HOST','SMTP_PORT','SMTP_FROM','SMTP_USER','SMTP_PASSWORD','SMTP_SECURITY'];
 for(const [file,production] of [['.env',false],['.env.production',true]]){
  const content=await readFile(file,'utf8'),env=parseEnv(content);
