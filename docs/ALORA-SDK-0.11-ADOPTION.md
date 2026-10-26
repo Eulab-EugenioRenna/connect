@@ -1,0 +1,11 @@
+# Consumer ALORA — adozione candidata SDK 0.11.0
+
+26 ottobre 2026. L’utente ha autorizzato il tarball nello sviluppo ALORA; nessuna pubblicazione npm o distribuzione Connect è eseguita da questa adozione. Contratto del produttore: [DELEGATED-ACCOUNTS-STEP-5.md](DELEGATED-ACCOUNTS-STEP-5.md).
+
+ALORA usa la medesima istanza ConnectApplication e application.team.createUser. La chiamata avviene fuori da application.services, senza annidare lock sulla sessione. Cliente/app/sorgente/azienda restano derivati dal contesto SDK; il browser sceglie solo profilo operativo, ruoli concedibili e restrizioni locali. La policy locale non amplia licenza, delega o concessioni centrali.
+
+Prima della chiamata il consumer persiste un profilo locale inattivo con ID stabile, hash casuale inutilizzabile e ricevuta locale dell’intento (ruoli iniziali e binding). Non conserva password, token o segreti nella ricevuta. A ogni invio il campo password viene svuotato. La conferma verifica gli ID autorevoli restituiti e attiva il profilo locale; una risposta persa o errore SQL lascia ripresa esplicita sullo stesso ID. Nessun retry automatico, unione per email, reset di password o riattivazione mediante ripetizione. Un esito ssoSetupRequired viene presentato come configurazione provider ancora necessaria, senza dichiarare invio email o login già collaudato.
+
+Verifica consumer: 179 test ALORA, build API/admin/pubblica, lint e Prisma validate; fixture PostgreSQL isolata con SDK/identità simulati per collisioni, scope, password non persistite, rollback/finalizzazione, ripresa, risposta incoerente e sospensioni. Migrazione ALORA additiva della sola ricevuta, dati originari riconciliati e backup locale ripristinato su database temporaneo. Queste prove non equivalgono al ciclo reale nuovo utente → SSO in ALORA.
+
+Il Docker Connect effettivo è stato letto senza modificarlo e risultava a schema 013. Prima del collaudo C1 dell’utente servono API aggiornata, migrazione 014 e bootstrap degli attributi Keycloak secondo la consegna del produttore. Nessun account/pratica operativa Connect è stato creato, nessun nuovo login reale eseguito. La candidata conserva il checksum SHA-256 b75d3c46ba8fbcf17dc522083f172abc3d07928c2f697d0f0c8ba182b6b749d5. Pubblicazione e accettazione operativa restano passaggi distinti.
