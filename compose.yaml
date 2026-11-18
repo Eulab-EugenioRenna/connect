@@ -11,6 +11,7 @@ x-common-env: &common-env
 services:
  postgres:
   image: postgres:17.6-bookworm
+  restart: unless-stopped
   environment:
    POSTGRES_USER: connect
    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Configura .env}
@@ -24,6 +25,7 @@ services:
    retries: 20
  redis:
   image: redis:7.4.5-alpine
+  restart: unless-stopped
   command: [sh, -c, 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
   environment:
    REDIS_PASSWORD: ${REDIS_PASSWORD:?Configura .env}
@@ -35,6 +37,7 @@ services:
    retries: 20
  keycloak:
   image: eulab-connect-keycloak
+  restart: unless-stopped
   pull_policy: build
   build: {context: ., dockerfile: infra/keycloak/Dockerfile}
   command: [start-dev, --import-realm]
