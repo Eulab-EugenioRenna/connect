@@ -50,10 +50,10 @@ for(const redirect of ['http://localhost:8088/','http://127.0.0.1:8088/']){
 const service=await fetch(issuer+'/protocol/openid-connect/token',{method:'POST',body:new URLSearchParams({grant_type:'client_credentials',client_id:'connect-identity-admin',client_secret:process.env.OIDC_IDENTITY_ADMIN_SECRET})});assert.equal(service.status,200,'Servizio identita non configurato');
 const pool=new pg.Pool({connectionString:process.env.DATABASE_URL});
 try{
- assert.equal((await pool.query('SELECT count(*)::int AS n FROM schema_migrations')).rows[0].n,13);
+ assert.equal((await pool.query('SELECT count(*)::int AS n FROM schema_migrations')).rows[0].n,15);
  assert.equal((await pool.query('SELECT count(*)::int AS n FROM identities WHERE subject=$1',[claims.sub])).rows[0].n,1);
  let ready=false;for(let n=0;n<30;n++){if((await pool.query("SELECT id FROM runners WHERE heartbeat_at>now()-interval '20 seconds'")).rowCount){ready=true;break;}await new Promise(r=>setTimeout(r,1000));}assert(ready,'Runner non pronto');
- console.log(JSON.stringify({subject:claims.sub,name:claims.name,login:true,api:true,identityService:true,migrations:13,runner:true}));
+ console.log(JSON.stringify({subject:claims.sub,name:claims.name,login:true,api:true,identityService:true,migrations:15,runner:true}));
 }finally{await pool.end();}
 `;
 let started=false;
@@ -69,7 +69,7 @@ try{
  const second=JSON.parse(run(['run','--rm','--no-deps','-T','--entrypoint','node','bootstrap','--input-type=module'],probe));
  assert.deepEqual(second,first,'Il secondo avvio ha modificato identita o profilo');
  await mkdir('docs/verification/startup',{recursive:true});
- await writeFile('docs/verification/startup/compose-up.json',JSON.stringify({at:new Date().toISOString(),project,isolated:true,bootstrapImage:services.bootstrap.image,bootstrapImageOverride:!!process.env.BOOTSTRAP_TEST_IMAGE,freshVolumes:true,automaticBootstrap:true,loginPkce:true,loopbackCallbacks:true,adminApi:true,identityService:true,migrations:13,runnerHeartbeat:true,secondUp:true,existingPasswordPreserved:true,existingSubjectPreserved:true,existingProfilePreserved:true,whatsappPaired:false,messagesSent:0},null,2)+'\n');
+ await writeFile('docs/verification/startup/compose-up.json',JSON.stringify({at:new Date().toISOString(),project,isolated:true,bootstrapImage:services.bootstrap.image,bootstrapImageOverride:!!process.env.BOOTSTRAP_TEST_IMAGE,freshVolumes:true,automaticBootstrap:true,loginPkce:true,loopbackCallbacks:true,adminApi:true,identityService:true,migrations:15,runnerHeartbeat:true,secondUp:true,existingPasswordPreserved:true,existingSubjectPreserved:true,existingProfilePreserved:true,whatsappPaired:false,messagesSent:0},null,2)+'\n');
  console.log('Secondo compose up: ID, profilo e password originali conservati. Nessun bootstrap manuale.');
 }finally{
  try{if(started)run(['down','--volumes','--remove-orphans']);}finally{await rm(scratch,{recursive:true,force:true});}

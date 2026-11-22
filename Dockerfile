@@ -12,7 +12,7 @@ COPY tsconfig.json ./
 COPY apps/api ./apps/api
 COPY apps/runner/src ./apps/runner/src
 COPY packages/sdk ./packages/sdk
-COPY scripts/build-runtime.mjs scripts/setup-admin.mjs ./scripts/
+COPY scripts/build-runtime.mjs scripts/setup-admin.mjs scripts/identity-proof-profile.mjs ./scripts/
 RUN npm run build:runtime
 
 FROM dependencies AS web-build

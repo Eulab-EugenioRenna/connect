@@ -1,10 +1,10 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, ForbiddenException } from '@nestjs/common';
 import { Database } from './database.js';
 import { Principal } from './auth.js';
 import { decision } from './policy.js';
 @Injectable()
 export class Authorization {
-  constructor(private readonly db: Database) {}
+  constructor(@Inject(Database) private readonly db: Pick<Database,'query'>) {}
   async check(p: Principal, installationId: string, permission: string) {
     if (p.admin) return { allowed:true, reason:'technical_admin' };
     if (p.installationId !== installationId || !p.subject) return { allowed:false, reason:'installation_or_identity_missing' };

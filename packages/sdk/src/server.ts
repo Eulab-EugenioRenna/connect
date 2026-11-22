@@ -1,3 +1,5 @@
+import {automationClient} from './automations.js';
+export type {AutomationChannel,AutomationDelegationInput,AutomationDelegation,AutomationGrant,AutomationScope,AutomationVerification,DelegatedMessageInput,DelegatedMessageStatus,DelegatedMessageWithdrawal,WebhookRegistration,ConnectWebhookEvent,WhatsAppMessageEventPayload} from './automations.js';
 export type {InteractiveAction,InteractiveContent,InteractiveResponse,ProviderCommand,ProviderOperation,ConversationContact,CallIdentity,CallSnapshot,CallCapabilities,CallActionResult} from './interactive.js';
 export type {IVRInput,IVRPrompt,IVRChannel,VoiceIVRSession} from './bot.js';
 export type {WhatsAppRealtimeEvent,WhatsAppSnapshot,WhatsAppRealtimeStatus,WhatsAppSubscribeOptions,WhatsAppSubscription} from './realtime.js';
@@ -12,8 +14,23 @@ import { createHmac,timingSafeEqual } from 'node:crypto';
 export interface LocalUserProfile {localUserId:string;username:string;email:string;displayName:string;
  // Password verificata localmente poco prima della chiamata. Serve solo a inizializzare una nuova identità:
  // Connect la inoltra al provider nella richiesta di creazione e non la conserva.
- initialPassword?:string}
+ initialPassword?:string; initialPasswordTemporary?:boolean}
 export interface MirroredUser {installationId:string;customerId:string;localUserId:string;subject:string;username?:string;created:boolean;status:'created'|'already_linked'|'recovered';ssoSetupRequired:boolean|null}
+export interface ApplicationTeamUserInput {
+ localUser:{localUserId:string;username?:string;email:string;firstName:string;lastName:string;role:'manager'|'reception'|'collaborator';permissions:string[]};
+ roleIds:string[];initialPassword?:string;initialPasswordTemporary?:boolean;
+}
+export interface ApplicationMirrorInput extends LocalUserProfile {
+ application:{sourceId:string;localTenantId:string;firstName:string;lastName:string;role:'manager'|'reception'|'collaborator';permissions:string[];roleIds:string[]};
+}
+export interface ApplicationTeamUserResult extends MirroredUser {appId:string;sourceId:string;localTenantId:string;roleIds:string[];applicationAccess:boolean}
+/** Business failures preserve a valid application session; uncertain outcomes require an explicit read/retry. */
+export class ConnectApiError extends Error {
+ readonly code:string;
+ constructor(readonly status:number,result:{code?:string;message?:unknown}){
+  super(`Connect ${status}: ${JSON.stringify(result)}`);this.name='ConnectApiError';this.code=typeof result.code==='string'?result.code:status===401?'authentication_required':status===403?'forbidden':status===400?'invalid_input':status===409?'conflict':'service_unavailable';
+ }
+}
 export type OnboardingRequestState='pending'|'approved'|'migrating'|'completed'|'rejected'|'expired'|'failed';
 export type OnboardingNextAction='wait'|'sign_in'|'choose_connect_password'|'resubmit'|'contact_admin'|'closed';
 export interface OnboardingRequestStatus {requestId:string;state:OnboardingRequestState;nextAction?:OnboardingNextAction}
@@ -90,7 +107,7 @@ export class ConnectServer {
  constructor(private readonly config:{apiUrl:string;installationId:string;secret:string;domain?:string;functionFallbackUrl?:string;catalogUrl?:string;basePath?:string;requestTimeoutMs?:number}){}
  async request<T=any>(path:string,method='GET',body?:unknown,accessToken?:string,extra:Record<string,string>={}):Promise<T>{
   const response=await fetch(`${this.config.apiUrl}${path}`,{method,...(this.config.requestTimeoutMs?{signal:AbortSignal.timeout(this.config.requestTimeoutMs),redirect:'error' as const}:{}),headers:{'Content-Type':'application/json','X-Installation-Id':this.config.installationId,'X-Installation-Secret':this.config.secret,...(accessToken?{Authorization:`Bearer ${accessToken}`} : {}),...extra},body:body===undefined?undefined:JSON.stringify(body)});
-  const result=await response.json();if(!response.ok)throw new Error(`Connect ${response.status}: ${JSON.stringify(result)}`);return result;
+  const result=await response.json();if(!response.ok)throw new ConnectApiError(response.status,result);return result;
  }
  functionUrl(feature:string,path?:string){
   if(!/^[a-z][a-z0-9_.:-]{0,79}$/.test(feature)||!this.config.domain)throw new Error('Dominio o funzione non valido');
@@ -99,6 +116,8 @@ export class ConnectServer {
  }
  authorize(accessToken:string,permission:string){return this.request<{allowed:boolean;reason:string}>('/v1/authorize','POST',{installationId:this.config.installationId,permission},accessToken);}
  whatsapp(accessToken:string|(()=>Promise<string>)){return whatsappClient(async(path,method,body,extra)=>this.request(path,method,body,typeof accessToken==='function'?await accessToken():accessToken,extra),this.config.installationId,{apiUrl:this.config.apiUrl});}
+ /** Backend only. Supply a personal token for creation/recovery; workers use the stored delegation credential. */
+ automations(accessToken?:string|(()=>Promise<string>)){return automationClient(async(path,method,body,extra)=>this.request(path,method,body,typeof accessToken==='function'?await accessToken():accessToken,extra),this.config.installationId);}
  registerFunctions(url?:string){const source=url||this.config.catalogUrl||(this.config.domain?this.config.domain+(this.config.basePath||'')+functionCatalogPath:undefined);if(!source)throw new Error('URL funzioni o dominio richiesto');return this.request('/v1/catalog-source','POST',{url:source});}
  /**
   * Crea o recupera l'identità centrale collegata all'utente locale.
@@ -108,7 +127,12 @@ export class ConnectServer {
   * Connect, non compare nelle risposte e non viene applicata a identità già esistenti.
   * Le chiamate esistenti senza il campo mantengono il comportamento precedente.
   */
+ requestTeamPasswordReset(accessToken:string,subject:string){return this.request<{requested:true}>('/v1/team/users/'+encodeURIComponent(subject)+'/password-reset','POST',{},accessToken);}
  mirrorUser(user:LocalUserProfile){return this.request<MirroredUser>('/v1/users/mirror','POST',user);}
+ async mirrorApplicationUser(accessToken:string,user:ApplicationMirrorInput){
+  try{return await this.request<ApplicationTeamUserResult>('/v1/users/mirror','POST',user,accessToken);}
+  catch(error){if(error instanceof ConnectApiError)throw error;throw new ConnectApiError(0,{code:'mirror_outcome_uncertain',message:'Esito incerto: verifica e riprendi esplicitamente sullo stesso ID locale'});}
+ }
  teamOverview(accessToken:string){return this.request<TeamOverview>('/v1/team','GET',undefined,accessToken);}
  teamUsers(accessToken:string){return this.request<TeamUser[]>('/v1/team/users','GET',undefined,accessToken);}
  teamRoles(accessToken:string){return this.request<TeamRole[]>('/v1/team/roles','GET',undefined,accessToken);}

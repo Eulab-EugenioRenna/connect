@@ -143,7 +143,16 @@ export class ConnectBrowser {
   if(!this.token)throw new Error('Accedi con EULab SSO');
   const version=this.sessionVersion,token=this.token;
   const response=await fetch(`${this.config.apiUrl}${path}`,{method,referrerPolicy:'origin',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',...(this.config.installationId?{'X-Installation-Id':this.config.installationId}:{}),...extra},body:body===undefined?undefined:JSON.stringify(body)});
-  const data=await response.json();if(response.status===401&&version===this.sessionVersion&&token===this.token)this.clear();if(!response.ok)throw Object.assign(new Error(typeof data.message==='string'?data.message:JSON.stringify(data.message||data)),{status:response.status});return data;
+  // Proxies answer with HTML pages (502/503/504): never show raw parser errors to people.
+  const text=await response.text();let data:any=null;let parsed=true;
+  if(text){try{data=JSON.parse(text);}catch{parsed=false;}}
+  if(response.status===401&&version===this.sessionVersion&&token===this.token)this.clear();
+  if(!response.ok){
+   const message=parsed&&data&&typeof data.message==='string'?data.message:parsed&&data?.message?JSON.stringify(data.message):httpMessage(response.status);
+   throw Object.assign(new Error(message),{status:response.status});
+  }
+  if(!parsed)throw Object.assign(new Error('Risposta non valida dal server EULab Connect. Riprova tra poco.'),{status:response.status});
+  return data;
  }
  functionUrl(feature:string,path?:string){
   if(!/^[a-z][a-z0-9_.:-]{0,79}$/.test(feature))throw new Error('Chiave funzione non valida');
@@ -156,4 +165,14 @@ export class ConnectBrowser {
  context(){return this.request('/v1/context');}
  authorize(installationId:string,permission:string){return this.request<{allowed:boolean;reason:string}>('/v1/authorize','POST',{installationId,permission});}
  whatsapp(installationId=this.config.installationId){if(!installationId)throw new Error('InstallationId richiesto');return whatsappClient(this.request.bind(this),installationId,{apiUrl:this.config.apiUrl,register:close=>{this.streams.add(close);return()=>{this.streams.delete(close);};}});}
+}
+
+/** Plain-language message when the server did not send a JSON error. */
+function httpMessage(status:number):string{
+ if(status===401)return 'Sessione scaduta. Accedi di nuovo.';
+ if(status===403)return 'Non hai i permessi per questa sezione.';
+ if(status===404)return 'Elemento non trovato.';
+ if(status===429)return 'Troppe richieste ravvicinate. Attendi qualche secondo.';
+ if(status>=500)return 'EULab Connect non è raggiungibile in questo momento. Riprova tra poco.';
+ return 'Richiesta non riuscita ('+status+').';
 }

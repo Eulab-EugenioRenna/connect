@@ -1,6 +1,9 @@
 import {createHash,randomBytes,createCipheriv,createDecipheriv,timingSafeEqual} from 'node:crypto';
 import {createRemoteJWKSet,jwtVerify} from 'jose';
-import {ConnectOnboardingSource,ConnectOnboardingError,ConnectServer} from './server.js';
+import {ConnectOnboardingSource,ConnectOnboardingError,ConnectServer,ConnectApiError} from './server.js';
+import type {ApplicationTeamUserInput,ApplicationTeamUserResult} from './server.js';
+export {ConnectApiError} from './server.js';
+export type {ApplicationTeamUserInput,ApplicationTeamUserResult} from './server.js';
 import type {AuthorizedConnectContext,OnboardingRequestStatus,AppOnboardingActivationRequest,OnboardingNextAction,DeploymentMetadata,ApprovedApplicationConfiguration} from './server.js';
 import type {AccessResult,FunctionMatrix} from './functions.js';
 import type {ConnectApplicationStore,ConnectStoreTransaction} from './application-store.js';
@@ -102,7 +105,7 @@ export class ConnectApplication {
  private async read<T>(tx:ConnectStoreTransaction,id:string){const cipher=await tx.get(id);return cipher?this.open<T>(id,cipher):null;}
  private async take<T>(id:string){return this.transaction(id,async tx=>{const value=await this.read<T>(tx,id);await tx.remove(id);return value;});}
  private client(context:AuthorizedConnectContext){return new ConnectServer({apiUrl:this.config.apiUrl,installationId:context.binding.installationId,secret:context.binding.secret,requestTimeoutMs:10000});}
- private async onboarding<T>(operation:()=>Promise<T>):Promise<T>{try{return await operation();}catch(e){if(e instanceof ConnectOnboardingError)fail(e.status===409?'invalid_context':e.status>=500||e.status===0?'provider_unavailable':'access_denied');return fail('provider_unavailable');}}
+ private async onboarding<T>(operation:()=>Promise<T>):Promise<T>{try{return await operation();}catch(e){if(e instanceof ConnectOnboardingError)fail(e.status===409?'invalid_context':e.status>=500||e.status===429||e.status===0?'provider_unavailable':'access_denied');return fail('provider_unavailable');}}
  private async current(email:string,expected:AuthorizedConnectContext){
   const found=await this.onboarding(()=>this.source.loginContext(email));
   if(found.status!=='connect'&&found.status!=='configuration_required')return fail('access_denied');
@@ -113,8 +116,8 @@ export class ConnectApplication {
  private async verifyAccess(context:AuthorizedConnectContext,token:string):Promise<AccessResult>{
   let a:AccessResult;
   try{a=await this.client(context).permissions(token);}catch(cause){
-   const error=new ConnectApplicationError('access_denied');
-   const status=cause instanceof Error?cause.message.match(/^Connect (\d{3}):/)?.[1]:undefined;
+   const status=cause instanceof ConnectApiError?String(cause.status):cause instanceof Error?cause.message.match(/^Connect (\d{3}):/)?.[1]:undefined;
+   const error=new ConnectApplicationError(!status||status==='429'||Number(status)>=500?'provider_unavailable':'access_denied');
    error.authorizationDetail=status==='401'?'http_401':status==='403'?'http_403':status?'http_other':'transport';throw error;
   }
   const detail=a.canLogin!==true?'login_denied':a.appId!==(this.settings?.appId||this.config.appId)?'app_mismatch':a.installationId!==context.binding.installationId?'installation_mismatch':a.subject!==context.user.subject?'subject_mismatch':a.localUserId!==context.user.id?'local_user_mismatch':undefined;
@@ -209,6 +212,7 @@ export class ConnectApplication {
   const id='session:'+digest(sessionId);
   const result=await this.transaction(id,async tx=>{
    const s=await this.read<Session>(tx,id);if(!s||s.expiresAt<=Date.now())return {error:'session_expired' as const};
+   let rotatingGrantStarted=false;
    try{
     const intentId='refresh:'+digest(sessionId+':'+s.generation);
     const interrupted=await tx.get(intentId);if(interrupted)fail('session_expired');
@@ -218,14 +222,26 @@ export class ConnectApplication {
      // Commit a tombstone BEFORE a rotating grant: on an ambiguous response/crash the old token is never replayed.
      // The intent survives a crash/rollback and is checked on every session use.
      await this.put(tx,intentId,{pending:true},this.ttl);await tx.checkpoint();
+     rotatingGrantStarted=true;
      s.tokens=await this.grant({grant_type:'refresh_token',refresh_token:s.tokens.refresh_token});s.refreshedAt=Date.now();s.generation=opaque();
      // The new generation supersedes the durable intent only on commit.
     }
     await this.verifyAccess(s.context,s.tokens.access_token);
+   }catch(e){
+    // Deny this request without destroying a valid session for a transient read failure.
+    // After a rotating grant starts, retain the existing fail-closed invalidation.
+    if(!(e instanceof ConnectApplicationError&&e.code==='provider_unavailable'&&!rotatingGrantStarted))await tx.remove(id);
+    return {error:e instanceof ConnectApplicationError?e.code:'access_denied' as const};
+   }
+   try{
     const value=await fn(s);await tx.put(id,this.seal(id,s),s.expiresAt);return {value};
-   }catch(e){await tx.remove(id);return {error:e instanceof ConnectApplicationError?e.code:'access_denied' as const};}
+   }catch(error){
+    if(error instanceof ConnectApiError&&error.status===401){await tx.remove(id);return {error:'session_expired' as const};}
+    await tx.put(id,this.seal(id,s),s.expiresAt);return {operationError:error};
+   }
   });
   if('error' in result)return fail(result.error!);
+  if('operationError' in result)throw result.operationError;
   // Old intents expire with their session; no unsafe cleanup race between processes.
   return result.value;
  }
@@ -252,6 +268,14 @@ export class ConnectApplication {
  })};
  /** All existing Connect services share this authenticated server session. No callback is retried. */
  async services<T>(sessionId:string,operation:(client:ConnectServer,accessToken:string)=>Promise<T>):Promise<T>{return this.withSession(sessionId,false,s=>operation(this.client(s.context),s.tokens.access_token));}
+ readonly team={createUser:async(sessionId:string,input:ApplicationTeamUserInput):Promise<ApplicationTeamUserResult>=>this.withSession(sessionId,false,s=>{
+  const u=input.localUser;
+  return this.client(s.context).mirrorApplicationUser(s.tokens.access_token,{
+   localUserId:u.localUserId,username:u.username||'app-'+digest(JSON.stringify([this.config.sourceId,s.context.binding.installationId,u.localUserId])).slice(0,40),email:u.email,displayName:[u.firstName,u.lastName].join(' '),
+   ...(input.initialPassword===undefined?{}:{initialPassword:input.initialPassword,...(input.initialPasswordTemporary===undefined?{}:{initialPasswordTemporary:input.initialPasswordTemporary})}),
+   application:{sourceId:this.config.sourceId,localTenantId:s.context.tenant.id,firstName:u.firstName,lastName:u.lastName,role:u.role,permissions:u.permissions,roleIds:input.roleIds}
+  });
+ })};
  async diagnose(email?:string):Promise<ConnectDiagnosticReport>{
   const checks:{code:'configuration'|'discovery'|'source'|'authorization';status:'ok'|'failed'|'not_checked'}[]=[{code:'configuration',status:'ok'}];
   const sso=await this.loadSettings();

@@ -1,3 +1,6 @@
+import {AutomationController} from './automation.controller.js';
+import {AutomationService} from './automation.service.js';
+import {WebhookRegistrationService} from './webhook-registration.service.js';
 import {WhatsAppOperationsController} from './whatsapp-operations.controller.js';
 import {WhatsAppRealtimeController} from './whatsapp-realtime.controller.js';
 import {WhatsAppRealtimeService} from './whatsapp-realtime.service.js';
@@ -6,7 +9,9 @@ import {WhatsAppBotService} from './whatsapp-bot.service.js';
 import {MailService} from './mail.service.js';
 import {NotificationsController} from './notifications.controller.js';
 import {AccountSecurityController} from './account-security.controller.js';
+import {MeController} from './me.controller.js';
 import {UserMirrorsController} from './user-mirrors.controller.js';
+import {TeamPolicy} from './team-policy.js';
 import {TeamController} from './team.controller.js';
 import {OnboardingService} from './onboarding.service.js';
 import {AppOnboardingController,OnboardingAdminController} from './onboarding.controller.js';
@@ -41,7 +46,7 @@ import { WhatsAppController } from './whatsapp.controller.js';
  const status=error.code==='23505'?409:['23503','23514','22P02'].includes(error.code)?400:500;
  if(status===500)console.error('Errore interno',error.code||error.name);res.status(status).json({statusCode:status,message:status===409?'Record già presente':status===400?'Relazione o dato non valido':'Errore interno'});}
 }
-@Module({controllers:[WhatsAppOperationsController,WhatsAppRealtimeController,WhatsAppBotController,NotificationsController,AccountSecurityController,UserMirrorsController,TeamController,GuardianController,SessionsController,FunctionsController,WordPressController,SsoController,HealthController,IdentitiesController,AdminController,ConnectorsController,WhatsAppController,AppOnboardingController,OnboardingAdminController],providers:[WhatsAppRealtimeService,WhatsAppBotService,MailService,SessionsService,CatalogSourceService,CatalogReader,Database,IdentitiesService,Authorization,CatalogService,WhatsAppService,OnboardingService,{provide:APP_GUARD,useClass:AuthGuard},{provide:APP_FILTER,useClass:Errors}]}) export class AppModule {}
+@Module({controllers:[AutomationController,WhatsAppOperationsController,WhatsAppRealtimeController,WhatsAppBotController,NotificationsController,AccountSecurityController,MeController,UserMirrorsController,TeamController,GuardianController,SessionsController,FunctionsController,WordPressController,SsoController,HealthController,IdentitiesController,AdminController,ConnectorsController,WhatsAppController,AppOnboardingController,OnboardingAdminController],providers:[AutomationService,WebhookRegistrationService,TeamPolicy,WhatsAppRealtimeService,WhatsAppBotService,MailService,SessionsService,CatalogSourceService,CatalogReader,Database,IdentitiesService,Authorization,CatalogService,WhatsAppService,OnboardingService,{provide:APP_GUARD,useClass:AuthGuard},{provide:APP_FILTER,useClass:Errors}]}) export class AppModule {}
 export async function configureApp(app:any){
 // Express defaults would reject supported media payloads; explicit bounded parser.
 const express=await import('express');app.use(express.json({limit:'15mb'}));

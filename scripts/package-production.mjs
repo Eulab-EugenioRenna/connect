@@ -23,7 +23,7 @@ try{
  const result=spawnSync('tar',['-czf',target,'--null','-T',list],{cwd:root,stdio:'inherit'});if(result.status!==0)throw new Error('Creazione archivio fallita');
  const sha256=createHash('sha256').update(await readFile(target)).digest('hex');
  await writeFile(target+'.sha256',`${sha256}  eulab-connect-source.tar.gz\n`);
- await writeFile(join(dest,'manifest.json'),JSON.stringify({createdAt:new Date().toISOString(),sdkVersion:'0.9.0',providerVersion:'1.0.0',schema:'011',archive:relative(root,target),sha256,files:files.length,containsEnvironmentSecrets:false},null,2)+'\n');
+ await writeFile(join(dest,'manifest.json'),JSON.stringify({createdAt:new Date().toISOString(),sdkVersion:JSON.parse(await readFile('packages/sdk/package.json','utf8')).version,providerVersion:'1.0.0',schema:'015',archive:relative(root,target),sha256,files:files.length,containsEnvironmentSecrets:false},null,2)+'\n');
  console.log(`Pacchetto sorgente: ${relative(root,target)} (${files.length} file). SHA-256: ${sha256}`);
  console.log('Esclusi ambienti privati, dipendenze locali, profili WhatsApp, backup, sorgenti provider e artefatti di build.');
 }finally{await rm(scratch,{recursive:true,force:true});}

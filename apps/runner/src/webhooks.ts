@@ -16,3 +16,8 @@ export async function deliver(urlValue:string,cipher:string,event:unknown,id:str
    req.on('timeout',()=>req.destroy(new Error('WEBHOOK_TIMEOUT')));req.on('error',reject);req.end(body);
  });
 }
+
+/** The same stable envelope is signed on every delivery attempt. */
+export function webhookEnvelope(e:{id:string;kind:string;created_at:Date|string;installation_id:string;session_id:string;payload:unknown}){
+ return {id:e.id,kind:e.kind,createdAt:e.created_at,installationId:e.installation_id,sessionId:e.session_id,payload:e.payload};
+}

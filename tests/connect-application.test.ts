@@ -30,6 +30,7 @@ async function fixture(){
  let base='',legacyCalls=0,provisions=0,refreshes=0,revoked=false,required=false,badAccess=false,badSubject=false,uncertain=false,provisionFail=false;
  const codes=new Map<string,{nonce:string;challenge:string}>(),refreshTokens=new Set(['refresh-first']);
  const context={tenant:{id:'workspace-1',name:'Workshop',slug:'workshop'},binding:{installationId:'installation-1',customerId:'customer-1',secret:'installation-secret'},user:{id:'user-1',subject:'subject-1',email:'person@example.test',firstName:'Person',lastName:'Example',role:'owner' as const,permissions:['projects.read']}};
+ let mirrorStatus=201,contextStatus=200,accessStatus=200;
  let malformed=false,known=true,request:any;const received:any[]=[];
  const server=createServer(async(req,res)=>{
   let raw='';for await(const chunk of req)raw+=chunk;const url=new URL(req.url!,base),path=url.pathname;
@@ -49,12 +50,18 @@ async function fixture(){
    return json({access_token:'access-first',refresh_token:'refresh-first',expires_in:300,id_token:id});
   }
   if(path.endsWith('/logout'))return json({});
+  if(path==='/v1/app-onboarding/login-context'&&contextStatus!==200)return json({message:'Unavailable'},contextStatus);
   if(path==='/v1/app-onboarding/login-context')return json(malformed?{}:known?{status:'connect',context}:{status:'not_found',...(request?{request}:{})});
   if(path==='/v1/app-onboarding/configuration')return json({status:'ready',configuration:{sourceId:'workshop-dev',appId:'workshop',issuer:base,clientId:'workshop',redirectUri:base+'/callback',clientSecret:'configuration-secret'}});
   if(path==='/v1/app-onboarding/requests'){received.push(JSON.parse(raw));request={requestId:'request-1',state:'pending',nextAction:'wait'};return json(request);}
   if(path==='/v1/app-onboarding/password-recovery'){received.push(JSON.parse(raw));return json({requestId:'request-1',state:'pending',nextAction:'wait'});}
+  if(path==='/v1/access'&&accessStatus!==200)return json({message:'Unavailable'},accessStatus);
   if(path==='/v1/access')return json({canLogin:!revoked,appId:'workshop',installationId:context.binding.installationId,subject:context.user.subject,localUserId:badAccess?'foreign-user':context.user.id});
   if(path==='/v1/authorize')return json({allowed:!revoked,reason:'permission'});
+  if(path==='/v1/users/mirror'){
+   const body=JSON.parse(raw);received.push({mirror:body,headers:req.headers});if(mirrorStatus===0){res.destroy();return;}
+   return json(mirrorStatus===201?{installationId:context.binding.installationId,customerId:context.binding.customerId,appId:'workshop',sourceId:'workshop-dev',localTenantId:context.tenant.id,localUserId:body.localUserId,subject:'created-subject',created:true,status:'created',ssoSetupRequired:false,roleIds:body.application.roleIds,applicationAccess:true}:{code:mirrorStatus===400?'mirror_password_rejected':'mirror_test_denied',message:'Safe business error'},mirrorStatus);
+  }
   return json({},404);
  });server.listen(0,'127.0.0.1');await once(server,'listening');base='http://127.0.0.1:'+(server.address() as any).port;
  const memory=new TestStore();let store:ConnectApplicationStore=memory,pool:pg.Pool|undefined,secondPool:pg.Pool|undefined,secondStore:ConnectApplicationStore|undefined;
@@ -68,7 +75,7 @@ async function fixture(){
  const cookies=(directives:CookieDirective[])=>{for(const c of directives)browser.cookies[c.name]=c.value;};
  async function callback(){const start=await a.auth.signIn({email:context.user.email},browser);assert.equal(start.status,'redirect');if(start.status!=='redirect')throw Error();cookies(start.cookies);const u=new URL(start.url),code=randomUUID();codes.set(code,{nonce:u.searchParams.get('nonce')!,challenge:u.searchParams.get('code_challenge')!});return {state:u.searchParams.get('state')!,code};}
  async function session(){const input=await callback(),h=await b.auth.callback(input,browser);cookies(h.cookies);const exchange=await a.auth.exchange(h.handoff,browser);cookies(exchange.cookies);return exchange.session.sessionId;}
- return {codeFor:(url:string)=>{const u=new URL(url),code=randomUUID();codes.set(code,{nonce:u.searchParams.get('nonce')!,challenge:u.searchParams.get('code_challenge')!});return {state:u.searchParams.get('state')!,code};},a,b,config,browser,memory,store,pool,context,received,cookies,callback,session,get counts(){return {legacyCalls,provisions,refreshes};},set:(v:any)=>{if('malformed'in v)malformed=v.malformed;if('known'in v)known=v.known;if('request'in v)request=v.request;if('revoked'in v)revoked=v.revoked;if('required'in v)required=v.required;if('badAccess'in v)badAccess=v.badAccess;if('badSubject'in v)badSubject=v.badSubject;if('uncertain'in v)uncertain=v.uncertain;if('provisionFail'in v)provisionFail=v.provisionFail;},close:async()=>{await pool?.end();await secondPool?.end();server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));}};
+ return {codeFor:(url:string)=>{const u=new URL(url),code=randomUUID();codes.set(code,{nonce:u.searchParams.get('nonce')!,challenge:u.searchParams.get('code_challenge')!});return {state:u.searchParams.get('state')!,code};},a,b,config,browser,memory,store,pool,context,received,cookies,callback,session,get counts(){return {legacyCalls,provisions,refreshes};},set:(v:any)=>{if('contextStatus'in v)contextStatus=v.contextStatus;if('accessStatus'in v)accessStatus=v.accessStatus;if('mirrorStatus'in v)mirrorStatus=v.mirrorStatus;if('malformed'in v)malformed=v.malformed;if('known'in v)known=v.known;if('request'in v)request=v.request;if('revoked'in v)revoked=v.revoked;if('required'in v)required=v.required;if('badAccess'in v)badAccess=v.badAccess;if('badSubject'in v)badSubject=v.badSubject;if('uncertain'in v)uncertain=v.uncertain;if('provisionFail'in v)provisionFail=v.provisionFail;},close:async()=>{await pool?.end();await secondPool?.end();server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));}};
 }
 const rejectsCode=(fn:()=>Promise<unknown>,code:string)=>assert.rejects(fn,(e:any)=>e instanceof ConnectApplicationError&&e.code===code);
 
@@ -169,5 +176,43 @@ test('Application: presentation without OIDC, waiting practice, approved encrypt
   const restarted=new ConnectApplication(config),start=await restarted.auth.signIn({email:'person@example.test'},f.browser);assert.equal(start.status,'redirect');if(start.status!=='redirect')throw Error();f.cookies(start.cookies);
   const handoff=await restarted.auth.callback(f.codeFor(start.url),f.browser);f.cookies(handoff.cookies);
   const session=await restarted.auth.exchange(handoff.handoff,f.browser);assert.equal(session.session.profile.localUserId,'user-1');assert.equal(f.counts.provisions,1);assert.equal(f.counts.legacyCalls,2);assert(!JSON.stringify(session).includes('configuration-secret'));
+ }finally{await f.close();}
+});
+
+
+test('Application team.createUser derives approved context, sends both credentials once and preserves sessions on business/uncertain errors',async()=>{
+ const f=await fixture();try{
+  const session=await f.session();
+  const input={localUser:{localUserId:'persisted-local-id',username:'new.worker',email:'new@example.test',firstName:'New',lastName:'Worker',role:'collaborator' as const,permissions:['projects.read']},roleIds:[randomUUID()],initialPassword:'Transient-Value-123!'};
+  const result=await f.a.team.createUser(session,input);assert.equal(result.applicationAccess,true);assert.equal(result.localUserId,input.localUser.localUserId);
+  const sent=f.received.find((r:any)=>r.mirror);assert.equal(sent.mirror.application.sourceId,'workshop-dev');assert.equal(sent.mirror.application.localTenantId,f.context.tenant.id);
+  assert.equal(sent.mirror.application.role,'collaborator');assert.deepEqual(sent.mirror.application.roleIds,input.roleIds);assert.equal(sent.headers['x-installation-secret'],'installation-secret');assert.equal(sent.headers.authorization,'Bearer access-first');
+  assert(!JSON.stringify(result).includes(input.initialPassword));assert(!JSON.stringify([...f.memory.records.values()]).includes(input.initialPassword));
+  for(const status of [400,403,409,503,0]){
+   f.set({mirrorStatus:status});const before=f.received.filter((r:any)=>r.mirror).length;
+   await assert.rejects(()=>f.a.team.createUser(session,input),(e:any)=>e.status===status&&e.code===(status===0?'mirror_outcome_uncertain':status===400?'mirror_password_rejected':'mirror_test_denied'));
+   assert.equal(f.received.filter((r:any)=>r.mirror).length,before+1,'Never retry mutations automatically');
+   assert.equal((await f.a.auth.resolve(session)).profile.localTenantId,f.context.tenant.id);
+  }
+  await assert.rejects(()=>f.a.services(session,async()=>{throw Error('Business callback failed');}));
+  assert.equal((await f.a.auth.resolve(session)).subject,f.context.user.subject);
+  f.set({mirrorStatus:401});await rejectsCode(()=>f.a.team.createUser(session,input),'session_expired');await rejectsCode(()=>f.a.auth.resolve(session),'session_expired');
+ }finally{await f.close();}
+});
+
+// Reproduces a rate-limited ALORA request without serving cached permissions.
+test('Application: transient validation failure denies request but preserves session before rotating grant',async()=>{
+ const f=await fixture();try{
+  const id=await f.session();let operations=0;
+  for(const flags of [{contextStatus:429},{contextStatus:503},{contextStatus:200,accessStatus:429},{accessStatus:503}]){
+   f.set(flags);
+   await rejectsCode(()=>f.a.services(id,async()=>{operations++;}),'provider_unavailable');
+   assert.equal(operations,0,'Never run operation with unavailable authorization');
+   f.set({contextStatus:200,accessStatus:200});
+   assert.equal((await f.b.auth.resolve(id)).subject,'subject-1');
+  }
+  assert.equal(f.counts.refreshes,0);
+  f.set({accessStatus:403});await rejectsCode(()=>f.a.auth.resolve(id),'access_denied');
+  f.set({accessStatus:200});await rejectsCode(()=>f.b.auth.resolve(id),'session_expired');
  }finally{await f.close();}
 });

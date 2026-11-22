@@ -1,3 +1,4 @@
+import {configureIdentityProofProfile} from './identity-proof-profile.mjs';
 import {randomBytes} from 'node:crypto';
 import {readFile,appendFile} from 'node:fs/promises';
 import pg from 'pg';
@@ -21,6 +22,7 @@ if(!ready)throw new Error('Keycloak non pronto dopo 180 secondi: bootstrap non e
 async function request(path,method='GET',body,token){const r=await fetch(issuer+path,{method,headers:{...(token?{Authorization:`Bearer ${token}`} :{}),'content-type':body instanceof URLSearchParams?'application/x-www-form-urlencoded':'application/json'},body:body===undefined?undefined:body instanceof URLSearchParams?body:JSON.stringify(body),signal:AbortSignal.timeout(15_000)});if(!r.ok)throw new Error(`Configurazione SSO ${method} ${path}: ${r.status}`);const t=await r.text();return t?JSON.parse(t):null;}
 const auth=await request('/realms/master/protocol/openid-connect/token','POST',new URLSearchParams({grant_type:'password',client_id:'admin-cli',username:process.env.KEYCLOAK_ADMIN,password:process.env.KEYCLOAK_ADMIN_PASSWORD}));
 const admin=(path,method='GET',body)=>request('/admin/realms/eulab'+path,method,body,auth.access_token);
+await configureIdentityProofProfile(admin);
 let [client]=await admin('/clients?clientId=connect-identity-admin');
 if(!client){await admin('/clients','POST',{clientId:'connect-identity-admin',enabled:true,publicClient:false,secret:process.env.OIDC_IDENTITY_ADMIN_SECRET,serviceAccountsEnabled:true,standardFlowEnabled:false,directAccessGrantsEnabled:false});[client]=await admin('/clients?clientId=connect-identity-admin');}
 const service=await admin(`/clients/${client.id}/service-account-user`);const [management]=await admin('/clients?clientId=realm-management');

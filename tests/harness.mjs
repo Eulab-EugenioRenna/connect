@@ -1,3 +1,4 @@
+import pgDriver from 'pg';
 import 'reflect-metadata';
 import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
@@ -24,7 +25,13 @@ export async function harness(settings={}){
  }
  globalThis.fetch=(input,options)=>String(input).startsWith(issuer)?oidcFetch(input,options):originalFetch(input,options);
  Object.assign(process.env,{DATABASE_URL:'postgres://unused',REDIS_URL:'redis://127.0.0.1:6379',DATA_ENCRYPTION_KEY:'a'.repeat(64),MIGRATION_ENCRYPTION_KEY:'b'.repeat(64),ONBOARDING_PASSWORD_TTL_SECONDS:'86400',OIDC_ISSUER:issuer,OIDC_INTERNAL_ISSUER:issuer,OIDC_JWKS_URL:issuer+'/protocol/openid-connect/certs',OIDC_CLIENT_SECRET:settings.realOidc?.clientSecret||'test-only'});
- const pg=new PGlite();await pg.exec(await readFile('infra/postgres/001-connect.sql','utf8'));await pg.exec(await readFile('infra/postgres/002-admin.sql','utf8'));await pg.exec(await readFile('infra/postgres/003-wordpress-users.sql','utf8'));await pg.exec(await readFile('infra/postgres/004-function-sources.sql','utf8'));await pg.exec(await readFile('infra/postgres/005-wordpress-guardian.sql','utf8'));
+ let pg;
+ if(settings.databaseUrl){
+  const schema='qa_'+crypto.randomUUID().replaceAll('-','');
+  const admin=new pgDriver.Pool({connectionString:settings.databaseUrl});await admin.query('CREATE SCHEMA '+schema);
+  const pool=new pgDriver.Pool({connectionString:settings.databaseUrl,options:'-c search_path='+schema});
+  pg={exec:sql=>pool.query(sql),query:(sql,params)=>pool.query(sql,params),transaction:async fn=>{const tx=await pool.connect();try{await tx.query('BEGIN');const value=await fn(tx);await tx.query('COMMIT');return value;}catch(e){await tx.query('ROLLBACK');throw e;}finally{tx.release();}},close:async()=>{await pool.end();await admin.query('DROP SCHEMA '+schema+' CASCADE');await admin.end();}};
+ }else pg=new PGlite();await pg.exec(await readFile('infra/postgres/001-connect.sql','utf8'));await pg.exec(await readFile('infra/postgres/002-admin.sql','utf8'));await pg.exec(await readFile('infra/postgres/003-wordpress-users.sql','utf8'));await pg.exec(await readFile('infra/postgres/004-function-sources.sql','utf8'));await pg.exec(await readFile('infra/postgres/005-wordpress-guardian.sql','utf8'));
  await pg.exec(await readFile('infra/postgres/006-notifications.sql','utf8'));
  await pg.exec(await readFile('infra/postgres/007-whatsapp-bots.sql','utf8'));
  await pg.exec(await readFile('infra/postgres/008-whatsapp-realtime.sql','utf8'));
@@ -33,7 +40,10 @@ export async function harness(settings={}){
  await pg.exec(await readFile('infra/postgres/011-app-onboarding.sql','utf8'));
  await pg.exec(await readFile('infra/postgres/012-onboarding-recovery.sql','utf8'));
  await pg.exec(await readFile('infra/postgres/013-onboarding-presenters.sql','utf8'));
- const store={query:async(sql,params=[])=> (await pg.query(sql,params)).rows,transaction:async fn=>pg.transaction(async tx=>fn({query:async(sql,params=[])=>{const r=await tx.query(sql,params);return {...r,rowCount:r.affectedRows??r.rows.length};}})),onModuleDestroy:async()=>{}};
+ await pg.exec(await readFile('infra/postgres/014-delegated-accounts.sql','utf8'));
+ if(settings.beforeAutomationMigration)await settings.beforeAutomationMigration(pg);
+ await pg.exec(await readFile('infra/postgres/015-automation-delegations.sql','utf8'));
+ const store={query:async(sql,params=[])=> (await pg.query(sql,params)).rows,transaction:async fn=>pg.transaction(async tx=>fn({query:async(sql,params=[])=>{const r=await tx.query(sql,params);return {...r,rowCount:r.rowCount??r.affectedRows??r.rows.length};}})),onModuleDestroy:async()=>{}};
  const {AppModule,configureApp}=await import('../dist/server/apps/api/src/app.js');const {Database}=await import('../dist/server/apps/api/src/database.js');
  let readCatalog=async()=>{throw new Error('Fonte di test non disponibile');};
  const {CatalogReader}=await import('../dist/server/apps/api/src/catalog-reader.js');

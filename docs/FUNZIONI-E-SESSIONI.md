@@ -36,6 +36,8 @@ GET limitato a JSON, 1 MiB e 5 secondi, senza redirect né credenziali. In produ
 
 WordPress non crea utenti. Il login SSO cliente apre l’utente locale collegato e torna al sito. L’accesso amministrativo “Accedi come” richiede una selezione dall’elenco Connect, conserva i privilegi nativi e non modifica le altre sessioni dell’utente. Le sessioni WordPress aperte attraverso Connect vengono ricontrollate a ogni richiesta; le sessioni native con password rimangono indipendenti.
 
+Anche le installazioni web/SDK espongono **Utenti e accesso**: l’Admin EULab sceglie un profilo locale collegato e riceve un ticket monouso vincolato all’utente. L’app riscatta il ticket e apre una sessione breve, senza refresh, per quel profilo con le sue funzioni native; l’operatore viene ricontrollato su Connect e nessun account viene creato. Solo l’Admin può selezionare il profilo, il Technician mantiene l’accesso tecnico generico. [Flusso e contratto](ACCESSO-PROFILO-APP.md).
+
 ## Amministrazione delegata della squadra
 
 Le API `/v1/team` consentono al titolare di gestire i collaboratori della propria installazione senza acquisire privilegi globali. Richiedono un token utente e `X-Installation-Id`; cliente e applicazione derivano sempre dall’installazione autenticata e non sono accettati nel corpo della richiesta.

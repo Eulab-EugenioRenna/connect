@@ -21,8 +21,8 @@ export class AppOnboardingController {
 
  @Public() @Post('login-context')
  async loginContext(@Body() body:unknown,@Req() req:any){
-  const source=await this.onboarding.authenticate(req,body);
   const input=parse(loginContextSchema,body);
+  const source=await this.onboarding.authenticate(req,body,input.email);
   return this.onboarding.loginContext(source,input.email);
  }
 

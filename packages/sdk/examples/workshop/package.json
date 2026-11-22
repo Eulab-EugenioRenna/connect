@@ -4,5 +4,5 @@
   "type":"module",
   "engines":{"node":">=22"},
   "scripts":{"start":"node --env-file=.env server.mjs","check":"node --env-file=.env server.mjs --check","migrate":"node --env-file=.env server.mjs --migrate","seed":"node --env-file=.env server.mjs --seed"},
-  "dependencies":{"@eulab/connect":"file:../../eulab-connect-0.10.0.tgz","pg":"8.23.0"}
+  "dependencies":{"@eulab/connect":"file:../../eulab-connect-0.11.0.tgz","pg":"8.23.0"}
 }

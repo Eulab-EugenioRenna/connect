@@ -57,6 +57,25 @@ test('Sicurezza account: MFA e dispositivi senza segreti, revoca solo del propri
  assert.equal((await h.request('/v1/security/remember-me','PUT',{enabled:true,idleSeconds:1000,maxSeconds:500})).status,400);
  }finally{await h.close();}
 });
+test('Account personale: nome modificabile e rimozione della propria app senza toccare altri',async()=>{
+ const h=await harness();try{
+ const subject=randomUUID(),otp=randomUUID(),device=randomUUID(),calls:{path:string;method:string;body?:any}[]=[];
+ h.setIdentityRequest(async(path:string,method='GET',body?:any)=>{calls.push({path,method,body});if(path.endsWith('/credentials'))return {body:[{id:otp,type:'otp',userLabel:'Telefono'},{id:device,type:'eulab-trusted-device',credentialData:'{}'}]};if(method!=='GET')return {body:null};return {body:{id:subject,email:'person@example.test',firstName:'Old',lastName:'Name',emailVerified:true,requiredActions:[]}};});
+ const headers={Authorization:'Bearer '+await h.token(subject,[])};
+ assert.equal((await h.request('/v1/security/me/profile','PUT',{firstName:'',lastName:'X'},headers)).status,400);
+ assert.equal((await h.request('/v1/security/me/profile','PUT',{firstName:'A',lastName:'B',email:'x@y.z'},headers)).status,400);
+ const saved=await h.request('/v1/security/me/profile','PUT',{firstName:' Anna ',lastName:'Neri'},headers);
+ assert.equal(saved.status,200);assert.deepEqual(saved.body,{firstName:'Anna',lastName:'Neri',email:'person@example.test'});
+ const put=calls.find(c=>c.method==='PUT'&&c.path===`/users/${subject}`);assert.equal(put?.body.firstName,'Anna');assert.equal(put?.body.email,'person@example.test');
+ // Only an authenticator app, never a trusted device or an unknown id, through the personal route.
+ assert.equal((await h.request('/v1/security/me/authenticators/'+device,'DELETE',undefined,headers)).status,404);
+ const removed=await h.request('/v1/security/me/authenticators/'+otp,'DELETE',undefined,headers);
+ assert.equal(removed.status,200);assert.equal(removed.body.revoked,true);
+ assert(calls.some(c=>c.method==='DELETE'&&c.path===`/users/${subject}/credentials/${otp}`));
+ assert(calls.some(c=>c.method==='DELETE'&&c.path===`/users/${subject}/credentials/${device}`));
+ assert(calls.some(c=>c.path===`/users/${subject}/logout`));
+ }finally{await h.close();}
+});
 test('SMTP: nessuna modalità senza TLS, porte e indirizzi validati',()=>{
  const previous={...process.env};try{Object.assign(process.env,{SMTP_HOST:'smtp.example.test',SMTP_FROM:'no-reply@example.test',SMTP_SECURITY:'none'});assert.throws(smtpConfig);process.env.SMTP_SECURITY='starttls';process.env.SMTP_PORT='70000';assert.throws(smtpConfig);process.env.SMTP_PORT='587';process.env.SMTP_USER='user';delete process.env.SMTP_PASSWORD;assert.throws(smtpConfig);}finally{for(const key of Object.keys(process.env))if(!(key in previous))delete process.env[key];Object.assign(process.env,previous);}
 });

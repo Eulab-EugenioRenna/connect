@@ -1,4 +1,7 @@
-import {interactiveContentSchema} from '../../api/src/whatsapp-interactive.js';
+import {AutomationService} from '../../api/src/automation.service.js';
+import {IdentitiesService} from '../../api/src/identities.service.js';
+import {recordMessage} from './message-record.js';
+import {runOutbox,recoverInterruptedOutbox} from './outbox.js';
 import {runProviderOperation} from './provider-operation.js';
 import 'reflect-metadata';
 import {WhatsAppBotService} from '../../api/src/whatsapp-bot.service.js';
@@ -11,11 +14,9 @@ import {Database,audit} from '../../api/src/database.js';
 import {Authorization} from '../../api/src/authorization.js';
 import {required,redisOptions} from '../../api/src/config.js';
 import {OpenWaAdapter,WaClient} from './openwa.js';
-import {introspect} from '../../api/src/oidc.js';
-import {unseal} from '../../api/src/security.js';
-import {deliver} from './webhooks.js';
+import {deliver,webhookEnvelope} from './webhooks.js';
 const db=new Database(),policy=new Authorization(db),redis=new Redis(required('REDIS_URL'));
-const bots=new WhatsAppBotService(db,policy);
+const bots=new WhatsAppBotService(db,policy),automations=new AutomationService(db,new IdentitiesService(db));
 const runner=required('RUNNER_ID');if(!/^[a-zA-Z0-9_-]{1,40}$/.test(runner))throw new Error('RUNNER_ID non valido');
 const capacity=Number(process.env.RUNNER_CAPACITY||2);if(!Number.isInteger(capacity)||capacity<1||capacity>50)throw new Error('Capacità runner non valida');
 const adapter=new OpenWaAdapter(),clients=new Map<string,WaClient>(),leases=new Map<string,string>(),starting=new Set<string>();
@@ -31,26 +32,7 @@ async function record(session:any,m:any,emit:boolean){
  if(['buttons_response','list_response','native_flow_response','interactive'].includes(m.type))return;
  let media:string|undefined;
  if(m.mimetype&&clients.has(session.id)){try{media=await clients.get(session.id)!.decryptMedia(m);if(media.length>14_000_000)media=undefined;}catch{ /* WhatsApp may no longer make media available. */ }}
- const interactive=interactiveContentSchema.safeParse(m.interactiveContent);
- const chatId=String(m.chatId||(m.fromMe?m.to:m.from));
- const body={interactive:interactive.success?interactive.data:null,text:typeof m.body==='string'?m.body:typeof m.caption==='string'?m.caption:'',senderName:typeof m.sender?.pushname==='string'?m.sender.pushname.slice(0,200):null,quotedText:typeof m.quotedMsg?.body==='string'?m.quotedMsg.body.slice(0,2000):null,mimetype:m.mimetype||null,filename:m.filename||null,media:media||null,mediaAvailable:!!media,selectedButtonId:m.selectedButtonId||null,poll:m.pollData||null};
- await db.transaction(async tx=>{
-   const result=await tx.query('INSERT INTO messages(id,session_id,archive_id,provider_id,chat_id,direction,kind,body,occurred_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(archive_id,provider_id) DO NOTHING RETURNING id',[randomUUID(),session.id,session.archive_id,String(m.id),chatId,m.fromMe?'out':'in',m.type||'text',JSON.stringify(body),m.t?new Date(m.t*1000):new Date()]);
-   if(!result.rowCount&&interactive.success)await tx.query("UPDATE messages SET body=body || $3::jsonb WHERE archive_id=$1 AND provider_id=$2",[session.archive_id,String(m.id),JSON.stringify({interactive:interactive.success?interactive.data:null})]);
-   if(!result.rowCount&&media)await tx.query("UPDATE messages SET body=body || $3::jsonb WHERE archive_id=$1 AND provider_id=$2 AND body->>'media' IS NULL",[session.archive_id,String(m.id),JSON.stringify({media,mediaAvailable:true})]);
-   if(emit&&result.rowCount){
-     const id=randomUUID(),payload={providerId:m.id,chatId,kind:m.type,body};
-     await tx.query('INSERT INTO events VALUES($1,$2,$3,$4,$5,now())',[id,session.installation_id,session.id,'message.received',JSON.stringify(payload)]);
-     await tx.query("INSERT INTO deliveries(id,event_id,endpoint_id) SELECT gen_random_uuid(),$1,id FROM webhook_endpoints WHERE installation_id=$2 AND enabled=true",[id,session.installation_id]);
-   }
-   if(emit&&(result.rowCount||m.type==='interactive_response')&&!m.fromMe&&['chat','text','interactive_response'].includes(m.type||'text')&&typeof m.body==='string'&&m.body.trim()&&m.body.length<=2000&&m.t&&m.t*1000>=session.bot_ready_at-1000){
-    const messageId=result.rows[0]?.id||(await tx.query('SELECT id FROM messages WHERE archive_id=$1 AND provider_id=$2',[session.archive_id,String(m.id)])).rows[0]?.id;
-    if(messageId){
-     if(m.type==='interactive_response'&&!result.rowCount)await tx.query('UPDATE messages SET body=body || $2::jsonb WHERE id=$1',[messageId,JSON.stringify({selectedButtonId:m.selectedButtonId,text:m.body})]);
-     await bots.receive(tx,session,{id:messageId,provider_id:String(m.id),chat_id:chatId,text:m.selectedButtonId||m.body,occurred_at:new Date(m.t*1000)});
-    }
-   }
- });
+ await recordMessage(db,bots,session,m,emit,media);
 }
 async function start(id:string){
  if(clients.has(id)||starting.has(id)||stopping)return;starting.add(id);
@@ -72,7 +54,7 @@ async function start(id:string){
    await client.onAnyMessage(m=>{void record(session,m,true).catch(()=>console.error('Persistenza messaggio fallita',id));});
    await client.onInteractiveResponse(response=>{
     if(!['reply','list'].includes(response.type)||!response.id||!response.messageId)return;
-    void record(session,{id:response.messageId,chatId:response.chatId,from:response.senderId,fromMe:false,type:'interactive_response',body:response.label||response.id,selectedButtonId:response.id,t:response.timestamp?(response.timestamp>1e12?response.timestamp/1000:response.timestamp):Date.now()/1000},true).catch(()=>console.error('Risposta interattiva non persistita',id));
+    void record(session,{id:response.messageId,chatId:response.chatId,from:response.senderId,fromMe:false,type:'interactive_response',body:response.label||response.id,selectedButtonId:response.id,t:response.timestamp?(response.timestamp>1e12?response.timestamp/1000:response.timestamp):undefined},true).catch(()=>console.error('Risposta interattiva non persistita',id));
    });
    for(const [listener,kind]of [[client.onIncomingCall.bind(client),'call.incoming'],[client.onCallState.bind(client),'call.state']] as const)await listener(call=>{void event(session,kind,call).catch(()=>console.error('Evento chiamata non persistito',id));});
    await client.onAck(ack=>{void event(session,'message.ack',ack).catch(()=>console.error('Persistenza ack fallita',id));});
@@ -122,29 +104,19 @@ const worker=new Worker(`wa-${runner}`,async job=>{
    if(leases.get(sessionId)!==owner||await redis.get(`owner:${sessionId}`)!==owner)throw new Error('SESSION_OWNER_LOST');
    await db.query(`UPDATE messages SET body=body || $4::jsonb WHERE id=$1 AND archive_id=$2 AND EXISTS(SELECT 1 FROM wa_sessions WHERE id=$3 AND archive_id=$2 AND state='connected' AND NOT delete_requested)`,[id,archiveId,sessionId,JSON.stringify({media:data,mediaAvailable:true})]);return;
  }
- const [o]=await db.query('SELECT o.*,s.runner_id,s.state AS session_state,i.enabled AS installation_enabled FROM outbox o JOIN wa_sessions s ON s.id=o.session_id JOIN installations i ON i.id=o.installation_id WHERE o.id=$1',[job.data.id]);
- if(!o||o.state!=='queued')return;
- const owner=leases.get(o.session_id);if(!owner||await redis.get(`owner:${o.session_id}`)!==owner)throw new Error('SESSION_OWNER_MISSING');
- const client=clients.get(o.session_id);if(!client)throw new Error('SESSION_NOT_READY');
- let allowed=false;
- if(o.bot_archive_id){
-  const [bot]=await db.query('SELECT actor,technical_admin,revision,enabled FROM wa_bots WHERE archive_id=$1',[o.bot_archive_id]);
-  allowed=!!bot&&bot.enabled&&bot.revision===o.bot_revision&&await bots.authorized(bot,o.installation_id);
- }else{
-  const current=await introspect(unseal(o.authorization_cipher));
-  const technical=current.realm_access?.roles?.includes('eulab-admin')===true;
-  allowed=o.installation_enabled&&current.active&&current.sub===o.actor&&(technical||(await policy.check({subject:o.actor,admin:false,technician:false,server:true,installationId:o.installation_id},o.installation_id,'whatsapp.send')).allowed);
+ const result=await runOutbox(db,job.data.id,runner,async sessionId=>{
+  const owner=leases.get(sessionId),client=clients.get(sessionId);
+  return owner&&client&&await redis.get(`owner:${sessionId}`)===owner?payload=>adapter.send(client,payload):undefined;
+ },automations);
+ if(result?.outbox.payload.kind==='interactive'){
+  const [session]=await db.query('SELECT * FROM wa_sessions WHERE id=$1',[result.outbox.session_id]);
+  await record(session,{id:result.providerId,chatId:result.outbox.payload.to,fromMe:true,type:'interactive_message',body:result.outbox.payload.content.body,interactiveContent:result.outbox.payload.content},false);
  }
- if(!allowed||o.session_state!=='connected'){await db.query("UPDATE outbox SET state='cancelled',error='authorization_revoked' WHERE id=$1 AND state='queued'",[o.id]);return;}
- const [claimed]=await db.query("UPDATE outbox SET state='sending' WHERE id=$1 AND state='queued' AND (bot_archive_id IS NULL OR EXISTS(SELECT 1 FROM wa_bots b WHERE b.archive_id=outbox.bot_archive_id AND b.enabled AND b.revision=outbox.bot_revision)) RETURNING id",[o.id]);if(!claimed)return;
- try {const providerId=await adapter.send(client,o.payload);await db.query("UPDATE outbox SET state='sent',provider_id=$2 WHERE id=$1",[o.id,providerId]);if(o.payload.kind==='interactive'){const [session]=await db.query('SELECT * FROM wa_sessions WHERE id=$1',[o.session_id]);await record(session,{id:providerId,chatId:o.payload.to,fromMe:true,type:'interactive_message',body:o.payload.content.body,interactiveContent:o.payload.content,t:Date.now()/1000},false);}
- await event({id:o.session_id,installation_id:o.installation_id},'message.sent',{outboxId:o.id,providerId});}
- catch {await db.query("UPDATE outbox SET state='uncertain',error='Esito provider non confermato; nessun reinvio automatico' WHERE id=$1 AND state='sending'",[o.id]);}
 },{connection:redisOptions(),concurrency:capacity+2});
 const hookWorker=new Worker('webhooks',async job=>{
- const [d]=await db.query('SELECT d.*,e.kind,e.payload,e.created_at,e.installation_id,w.url,w.secret_cipher,w.enabled FROM deliveries d JOIN events e ON e.id=d.event_id JOIN webhook_endpoints w ON w.id=d.endpoint_id WHERE d.id=$1',[job.data.id]);
+ const [d]=await db.query('SELECT d.*,e.kind,e.payload,e.created_at,e.installation_id,e.session_id,w.url,w.secret_cipher,w.enabled FROM deliveries d JOIN events e ON e.id=d.event_id JOIN webhook_endpoints w ON w.id=d.endpoint_id WHERE d.id=$1',[job.data.id]);
  if(!d||['delivered','cancelled'].includes(d.state)||d.attempts>=8||!d.enabled)return;
- let status=0,error:string|null=null;try{status=await deliver(d.url,d.secret_cipher,{id:d.event_id,kind:d.kind,createdAt:d.created_at,installationId:d.installation_id,payload:d.payload},d.event_id);if(status<200||status>=300)error=`HTTP_${status}`;}catch(e:any){error=e.message;}
+ let status=0,error:string|null=null;try{status=await deliver(d.url,d.secret_cipher,webhookEnvelope({...d,id:d.event_id}),d.event_id);if(status<200||status>=300)error=`HTTP_${status}`;}catch(e:any){error=e.message;}
  await db.query("UPDATE deliveries SET attempts=attempts+1,last_status=$2,last_error=$3,state=$4,next_attempt_at=now()+interval '30 seconds' WHERE id=$1",[d.id,status,error,error?(d.attempts+1>=8?'failed':'retrying'):'delivered']);
  if(error)throw new Error(error);
 },{connection:redisOptions(),concurrency:4});
@@ -167,7 +139,7 @@ const renew=setInterval(async()=>{
  try{const runnerOk=await redis.eval("if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('expire',KEYS[1],20) else return 0 end",1,`runner-owner:${runner}`,runnerToken);if(!runnerOk)throw new Error('RUNNER_OWNER_LOST');for(const [id,token]of leases){const ok=await redis.eval("if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('expire',KEYS[1],20) else return 0 end",1,`owner:${id}`,token);if(!ok)throw new Error('OWNERSHIP_LOST');}}
  catch{stopping=true;await adapter.cancelPending();await Promise.allSettled([...clients.values()].map(c=>c.kill()));process.exit(1);}
 },5000);
-await db.query("UPDATE outbox SET state='uncertain',error='Runner interrotto durante invio; verifica manuale necessaria' WHERE state='sending' AND session_id IN (SELECT id FROM wa_sessions WHERE runner_id=$1)",[runner]);
+await recoverInterruptedOutbox(db,runner);
 await db.query("UPDATE wa_operations SET state='uncertain',error='Runner interrotto durante operazione; nessuna ripetizione automatica' WHERE state='running' AND session_id IN (SELECT id FROM wa_sessions WHERE runner_id=$1)",[runner]);
 await tick();const timer=setInterval(()=>{void tick().catch(()=>console.error('Dispatcher non disponibile'));},5000);
 async function shutdown(){stopping=true;clearInterval(timer);clearInterval(renew);await adapter.cancelPending();await Promise.allSettled([...clients.values()].map(c=>c.kill()));for(const id of [...leases.keys()])await release(id);await redis.eval("if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end",1,`runner-owner:${runner}`,runnerToken);await worker.close();await hookWorker.close();await queue.close();await hooks.close();await redis.quit();await db.onModuleDestroy();process.exit(0);}

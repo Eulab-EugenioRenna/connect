@@ -63,6 +63,7 @@ L’amministratore iniziale viene creato automaticamente da Compose usando nome 
 5. Configurare acquisto, abilitazione, scadenza, ruoli, appartenenze e collegamento esplicito tra subject Keycloak e ID utente locale. Le app esistenti possono inizializzare una nuova identità con la password appena verificata localmente tramite `mirrorUser({initialPassword})`: Connect la inoltra al provider e non la conserva. Nessuna identità viene collegata tramite uguaglianza dell’email. Il titolare può gestire la squadra con le API `/v1/team`, sempre entro cliente, applicazione, licenza e propria delega; le operazioni di modifica richiedono `team.manage`.
 6. Per applicazioni con account locali (ALORA) usare il contratto di **attivazione assistita e migrazione obbligatoria**: la sorgente backend registra il deployment prima dell’app, invia la richiesta con la password verificata localmente e l’Admin EULAB esegue la pratica da **Attivazioni e migrazioni**. La password resta cifrata con TTL e viene cancellata alla conclusione; nessun accesso locale alternativo e nessuna unione per email. [Contratto, endpoint, configurazione e limiti](docs/ATTIVAZIONE-MIGRAZIONE.md).
 7. Per WordPress, configurare il codice monouso nel file locale del plugin `pairing.local.php`: associazione automatica, nessuna pagina Impostazioni. In **Applicazioni → Siti WordPress → Utenti e accesso**, l’Admin Connect vede e filtra gli utenti sincronizzati e sceglie **Accedi come**. Il plugin apre l’account locale scelto con i suoi permessi, senza creare account tecnici e senza richiedere collegamenti SSO personali agli utenti WordPress. [Flusso e configurazione attuali](docs/WORDPRESS-ACCESSO.md).
+8. Per le installazioni web/SDK, in **Installazioni → Utenti e accesso** l’Admin sceglie un profilo locale collegato e **Accedi come**. Connect emette un ticket monouso vincolato all’utente; l’app apre una sessione per quel profilo senza creare account. Il Technician mantiene l’accesso tecnico generico. [Contratto consumer](docs/ACCESSO-PROFILO-APP.md).
 
 
 Un’applicazione può avere altre installazioni dalla sezione Installazioni. L’URL autorizzato è un’origine esatta (`https://dominio`, con porta se necessaria); la sottocartella è separata. Il fallback deve restare sulla stessa origine.
@@ -119,3 +120,8 @@ Dominio `https://auth.eulab.cloud`, pannello `/admin/`, SSO `/sso/`. Ingresso at
 ## SDK: riferimento pubblico
 
 Il pacchetto ufficiale è [@eulab/connect su npm](https://www.npmjs.com/package/@eulab/connect); il codice è in [packages/sdk](./packages/sdk) e il contratto applicativo in [INTEGRATION.md](./packages/sdk/INTEGRATION.md). La candidata locale 0.10.0 resta distinta dall’ultima versione pubblicata: la sua pubblicazione non è stata eseguita durante l’integrazione ALORA. Verificare il registry prima di sostituire il tarball consumer con una versione npm esatta.
+
+
+### Automazioni — aggiornamento locale schema 015
+
+API, runner e migratore sono aggiornati localmente al contratto SDK 0.12.0-rc.2. Backup, confronto dati, prove isolate e limiti sono nel [resoconto del passaggio](docs/LOCAL-AUTOMATIONS-RUNTIME-015.md). Nessun account o messaggio reale modificato e nessuna pubblicazione eseguita; dispositivo e webhook pubblico restano da accettare.

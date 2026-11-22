@@ -8,6 +8,8 @@ import {MailService,smtpConfig} from './mail.service.js';
 import {parse} from './validation.js';
 import {ApiInput} from './openapi.js';
 const preferenceSchema=z.object({preferredMethod:z.enum(['auto','totp','email'])}).strict();
+// Self-service profile: only the display name; the email stays the login identity.
+const profileSchema=z.object({firstName:z.string().trim().min(1).max(100),lastName:z.string().trim().min(1).max(100)}).strict();
 const rememberSchema=z.object({enabled:z.boolean(),idleSeconds:z.number().int().min(300).max(2592000),maxSeconds:z.number().int().min(300).max(7776000)}).strict().refine(v=>v.idleSeconds<=v.maxSeconds,'Inattività oltre durata massima');
 @Controller('v1/security') @ApiTags('Sicurezza account') @ApiBearerAuth()
 export class AccountSecurityController {
@@ -26,6 +28,18 @@ export class AccountSecurityController {
  }
  @Get('me') me(@Req() req:RequestContext){return this.security(this.subject(req));}
  @Put('me/preferences') @ApiInput(preferenceSchema) preferences(@Req() req:RequestContext,@Body() body:unknown){return this.savePreferences(this.subject(req),this.subject(req),body);}
+ @Put('me/profile') @ApiInput(profileSchema) async profile(@Req() req:RequestContext,@Body() body:unknown){
+  const subject=this.subject(req),b=parse(profileSchema,body),{path,user}=await this.account(subject);
+  await this.db.transaction(tx=>audit(tx,subject,'security.profile.update.requested',subject,b));
+  await this.identities.request(path,'PUT',{...user,firstName:b.firstName,lastName:b.lastName});
+  await this.db.transaction(tx=>audit(tx,subject,'security.profile.update',subject,b));
+  return {firstName:b.firstName,lastName:b.lastName,email:user.email??null};
+ }
+ // The person removes their own authenticator app: same effects as the admin revocation.
+ @Delete('me/authenticators/:id') async removeOwnAuthenticator(@Req() req:RequestContext,@Param('id') id:string){
+  parse(z.string().min(1).max(200),id);const subject=this.subject(req);
+  return this.revokeCredential(subject,subject,id,['otp']);
+ }
  @Admin() @Get('users/:subject') userSecurity(@Param('subject') subject:string){return this.security(subject);}
  @Admin() @Put('users/:subject/preferences') @ApiInput(preferenceSchema) userPreferences(@Req() req:RequestContext,@Param('subject') subject:string,@Body() body:unknown){return this.savePreferences(subject,this.subject(req),body);}
  private async savePreferences(subject:string,actor:string,body:unknown){
@@ -36,10 +50,12 @@ export class AccountSecurityController {
   if(state.preferredMethod!==b.preferredMethod)throw new ServiceUnavailableException('Configura il profilo MFA con npm run security:profile prima di salvare la preferenza');
   await this.db.transaction(tx=>audit(tx,actor,'security.preferences.update',subject,b));return state;
  }
- @Admin() @Delete('users/:subject/credentials/:id') async removeCredential(@Req() req:RequestContext,@Param('subject') subject:string,@Param('id') id:string){
-  const {path,credentials}=await this.account(subject),credential=credentials.find((c:any)=>c.id===id&&['otp','eulab-trusted-device'].includes(c.type));
+ @Admin() @Delete('users/:subject/credentials/:id') removeCredential(@Req() req:RequestContext,@Param('subject') subject:string,@Param('id') id:string){
+  return this.revokeCredential(subject,this.subject(req),id,['otp','eulab-trusted-device']);
+ }
+ private async revokeCredential(subject:string,actor:string,id:string,types:string[]){
+  const {path,credentials}=await this.account(subject),credential=credentials.find((c:any)=>c.id===id&&types.includes(c.type));
   if(!credential)throw new NotFoundException('App o dispositivo non trovato');
-  const actor=this.subject(req);
   await this.db.transaction(tx=>audit(tx,actor,'security.credential.revoke.requested',subject,{credentialId:id,type:credential.type}));
   await this.identities.request(path+'/credentials/'+encodeURIComponent(id),'DELETE');
   // Removing an authenticator also invalidates every trusted browser for this identity.

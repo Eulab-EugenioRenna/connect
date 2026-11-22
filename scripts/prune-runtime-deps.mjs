@@ -8,7 +8,7 @@ async function prune(directory){
  for(const entry of await readdir(directory,{withFileTypes:true})){
   const file=resolve(directory,entry.name);
   if(entry.isSymbolicLink())continue;
-  const legal=/^(licen[cs]e|notice|copying|authors)(\.|$)/i.test(entry.name);
+  const legal=/^(licen[cs]e|notice|copying|authors)(\.|$)/i.test(entry.name)&&!/\.(?:map|ts|tsx|mts|cts)$/i.test(entry.name);
   const developmentFile=!legal&&(/\.(?:map|ts|tsx|mts|cts|md|markdown)$/i.test(entry.name)||/^tsconfig(?:\..*)?\.json$/.test(entry.name));
   if(entry.isDirectory()&&developmentDirectories.has(entry.name)||entry.isFile()&&developmentFile){await rm(file,{recursive:true,force:true});removed++;}
   else if(entry.isDirectory())await prune(file);

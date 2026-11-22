@@ -53,37 +53,53 @@ export class OnboardingService implements OnApplicationBootstrap,OnModuleDestroy
     if(req.socket?.encrypted||forwarded==='https'||loopback)return;
     throw new BadRequestException('TLS richiesto per il contratto di onboarding');
   }
-  private rate(sourceId:string,req:any){
+  private rate(sourceId:string,req:any,limit=120){
     const key=sourceId+'|'+(req.socket?.remoteAddress||'unknown');
     const now=Date.now(),current=this.attempts.get(key);
     if(!current||current.reset<=now)this.attempts.set(key,{count:1,reset:now+60000});
-    else {current.count++;if(current.count>120)throw new HttpException({statusCode:429,message:'Troppe richieste alla sorgente'},429);}
+    else {current.count++;if(current.count>limit)throw new HttpException({statusCode:429,message:'Troppe richieste alla sorgente'},429);}
     for(const [k,v] of this.attempts)if(v.reset<=now)this.attempts.delete(k);
   }
-  async authenticate(req:any,body:any):Promise<SourceRow>{
+  async authenticate(req:any,body:any,contextEmail?:string):Promise<SourceRow>{
     this.transport(req);
-    this.rate('preauth',req);
-    const declared=String(req.headers?.['x-connect-source']||'');
-    const bearer=String(req.headers?.authorization||'').match(/^Bearer (.+)$/)?.[1];
-    const presenter=String(req.headers?.['x-connect-presenter']||'');
-    if(presenter&&bearer){
-      if(declared&&declared!==body?.sourceId)throw new ForbiddenException('Source header differente');
-      const source=await authenticatePresenter(this.db,presenter,bearer,body);this.rate(source.id,req);return source;
+    const contextLookup=contextEmail!==undefined;
+    if(contextLookup){
+      // Successful server-to-server session checks must not spend the shared
+      // onboarding/failed-credential budget of every user of a SaaS deployment.
+      const blocked=this.attempts.get('preauth|'+(req.socket?.remoteAddress||'unknown'));
+      if(blocked&&blocked.reset>Date.now()&&blocked.count>=120)throw new HttpException({statusCode:429,message:'Troppe richieste alla sorgente'},429);
+    }else this.rate('preauth',req);
+    const finish=(source:SourceRow)=>{
+      // Context lookups are authenticated service authorization checks, not login attempts.
+      // Keep a bounded per-identity service budget while retaining 120/min for failed credentials and onboarding.
+      this.rate(contextLookup?source.id+':context:'+hash(contextEmail.trim().toLowerCase()):source.id,req,contextLookup?600:120);
+      return source;
+    };
+    try{
+      const declared=String(req.headers?.['x-connect-source']||'');
+      const bearer=String(req.headers?.authorization||'').match(/^Bearer (.+)$/)?.[1];
+      const presenter=String(req.headers?.['x-connect-presenter']||'');
+      if(presenter&&bearer){
+        if(declared&&declared!==body?.sourceId)throw new ForbiddenException('Source header differente');
+        return finish(await authenticatePresenter(this.db,presenter,bearer,body));
+      }
+      if(!declared||!bearer)throw new UnauthorizedException('Credenziali di sorgente richieste');
+      const [source]=await this.db.query<SourceRow>('SELECT id,app_id,name,environment,origins,catalog_url,oidc_callbacks,deployment_identity,enabled,presenter_id,integration_approved,approved_app_id,verified_app_id,verified_origins FROM connect_sources WHERE id=$1',[declared]);
+      if(!source||!source.enabled||source.presenter_id)throw new UnauthorizedException('Sorgente non autorizzata');
+      const [stored]=await this.db.query<{secret_hash:string}>('SELECT secret_hash FROM connect_sources WHERE id=$1',[source.id]);
+      if(!stored||!equalSecret(bearer,stored.secret_hash)){
+        await this.auditFailure(source.id,declared,'invalid_secret');
+        throw new UnauthorizedException('Credenziali di sorgente non valide');
+      }
+      if(body?.schemaVersion!==1||body?.sourceId!==source.id||body?.appId!==source.app_id){
+        await this.auditFailure(source.id,declared,'body_source_mismatch');
+        throw new ForbiddenException('La sorgente autenticata non corrisponde alla richiesta');
+      }
+      return finish(source);
+    }catch(error){
+      if(contextLookup&&error instanceof HttpException&&[400,401,403].includes(error.getStatus()))this.rate('preauth',req);
+      throw error;
     }
-    if(!declared||!bearer)throw new UnauthorizedException('Credenziali di sorgente richieste');
-    const [source]=await this.db.query<SourceRow>('SELECT id,app_id,name,environment,origins,catalog_url,oidc_callbacks,deployment_identity,enabled,presenter_id,integration_approved,approved_app_id,verified_app_id,verified_origins FROM connect_sources WHERE id=$1',[declared]);
-    if(!source||!source.enabled||source.presenter_id)throw new UnauthorizedException('Sorgente non autorizzata');
-    const [stored]=await this.db.query<{secret_hash:string}>('SELECT secret_hash FROM connect_sources WHERE id=$1',[source.id]);
-    if(!stored||!equalSecret(bearer,stored.secret_hash)){
-      await this.auditFailure(source.id,declared,'invalid_secret');
-      throw new UnauthorizedException('Credenziali di sorgente non valide');
-    }
-    this.rate(source.id,req);
-    if(body?.schemaVersion!==1||body?.sourceId!==source.id||body?.appId!==source.app_id){
-      await this.auditFailure(source.id,declared,'body_source_mismatch');
-      throw new ForbiddenException('La sorgente autenticata non corrisponde alla richiesta');
-    }
-    return source;
   }
   private async auditFailure(sourceId:string,declared:string,reason:string){
     try{await this.audit(undefined,'onboarding.source.rejected',sourceId,{declared,reason});}catch{}

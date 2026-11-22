@@ -2,7 +2,7 @@
 
 Seconda applicazione autonoma, senza import ALORA, Nest o Angular. Un solo `ConnectApplication` e quattro adattatori: credenziali legacy, provisioning, persistenza PostgreSQL, restrizioni sui progetti. Nessun grant, PKCE, cifratura o macchina degli stati è implementato qui.
 
-1. Estrarre il tarball SDK e copiare questa cartella fuori dal repository. Installare con `npm install @eulab/connect@/percorso/eulab-connect-0.10.0.tgz pg@8.23.0` (sostituisce il riferimento relativo di esempio).
+1. Estrarre il tarball SDK e copiare questa cartella fuori dal repository. Installare con `npm install @eulab/connect@/percorso/eulab-connect-0.11.0.tgz pg@8.23.0` (sostituisce il riferimento relativo di esempio).
 2. Copiare `.env.example` in `.env`, impostare una **banca dati dedicata**, credenziale tecnica presenter e segreti secondo [la guida](../../INTEGRATION.md). Generare la chiave con `openssl rand -hex 32` e salvarla solo in `.env`.
 3. `npm run migrate`; facoltativamente impostare email/password legacy in `.env` e usare `npm run seed`. Il seed non sovrascrive account o hash esistenti. Nessun account admin o licenza viene creato.
 4. `npm run check` controlla discovery e sorgente, senza scritture. `npm start`, aprire `http://127.0.0.1:55179`.

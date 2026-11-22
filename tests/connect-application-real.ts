@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {BadRequestException,ConflictException} from '@nestjs/common';
 import pg from 'pg';
-import {mkdtemp,cp,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,cp,writeFile,rm,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve,join} from 'node:path';
 import {spawn} from 'node:child_process';
@@ -90,7 +90,8 @@ try{
  const childRun=(args:string[])=>new Promise<void>((resolveDone,reject)=>{const child=spawn(process.execPath,args,{cwd:directory,env:{PATH:process.env.PATH},stdio:['ignore','pipe','pipe']});child.stdout.resume();child.stderr.resume();child.once('error',reject);child.once('exit',status=>status===0?resolveDone():reject(Error('Independent demo command failed')));});
  try{
   await cp(resolve('packages/sdk/examples/workshop'),directory,{recursive:true});
-  await new Promise<void>((done,reject)=>{const child=spawn('npm',['install','--offline','--ignore-scripts','--no-audit','--no-fund',resolve('dist/releases/sdk/eulab-connect-0.10.0.tgz'),'pg@8.23.0'],{cwd:directory,stdio:'ignore'});child.once('error',reject);child.once('exit',status=>status===0?done():reject(Error('Standalone consumer install failed')));});
+  const sdkArchive=resolve('dist/releases/sdk/eulab-connect-'+JSON.parse(await readFile('packages/sdk/package.json','utf8')).version+'.tgz');
+  await new Promise<void>((done,reject)=>{const child=spawn('npm',['install','--offline','--ignore-scripts','--no-audit','--no-fund',sdkArchive,'pg@8.23.0'],{cwd:directory,stdio:'ignore'});child.once('error',reject);child.once('exit',status=>status===0?done():reject(Error('Standalone consumer install failed')));});
   const env={DATABASE_URL:process.env.CONNECT_SDK_TEST_DATABASE_URL!,CONNECT_API_URL:apiUrl,CONNECT_SOURCE_ID:source.id,CONNECT_PRESENTER_ID:technical.id,CONNECT_PRESENTER_SECRET:technical.secret,CONNECT_DEPLOYMENT_NAME:deployment.name,CONNECT_APP_ID:catalog.appId,CONNECT_ORIGIN:origin,CONNECT_ENCRYPTION_KEY:randomBytes(32).toString('hex'),DEMO_LEGACY_EMAIL:email,DEMO_LEGACY_PASSWORD:legacyPassword};
   await writeFile(join(directory,'.env'),Object.entries(env).map(([key,value])=>key+'='+JSON.stringify(value)).join('\n')+'\n',{mode:0o600});
   await childRun(['--env-file=.env','server.mjs','--migrate']);await childRun(['--env-file=.env','server.mjs','--seed']);await childRun(['--env-file=.env','server.mjs','--check']);

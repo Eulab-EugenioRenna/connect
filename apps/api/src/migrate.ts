@@ -60,6 +60,14 @@ try {
       await db.query(await readFile('infra/postgres/013-onboarding-presenters.sql','utf8'));
       await db.query("INSERT INTO schema_migrations(version) VALUES('013')");
     }
+    if (!(await db.query("SELECT 1 FROM schema_migrations WHERE version='014'")).rowCount) {
+      await db.query(await readFile('infra/postgres/014-delegated-accounts.sql','utf8'));
+      await db.query("INSERT INTO schema_migrations(version) VALUES('014')");
+    }
+    if (!(await db.query("SELECT 1 FROM schema_migrations WHERE version='015'")).rowCount) {
+      await db.query(await readFile('infra/postgres/015-automation-delegations.sql','utf8'));
+      await db.query("INSERT INTO schema_migrations(version) VALUES('015')");
+    }
   });
-  console.log('Migrazioni 001–013 verificate');
+  console.log('Migrazioni 001–015 verificate');
 } finally { await database.onModuleDestroy(); }
