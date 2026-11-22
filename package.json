@@ -9,7 +9,7 @@
     "dev:runner": "tsc -p apps/api/tsconfig.json && node --env-file=.env dist/server/apps/runner/src/main.js",
     "dev:demo": "vite --host 127.0.0.1 --config apps/demo/vite.config.ts",
     "build": "tsc -p apps/api/tsconfig.json && tsc -p packages/sdk/tsconfig.json && tsc -p apps/web/tsconfig.json && vite build --config apps/web/vite.config.ts && vite build --config apps/demo/vite.config.ts && node scripts/build-wordpress-installer.mjs",
-    "test": "tsc -p apps/api/tsconfig.json && node --import tsx --test tests/*.test.ts tests/*.test.mjs",
+    "test": "tsc -p apps/api/tsconfig.json && tsc -p packages/sdk/tsconfig.json && node --import tsx --test tests/*.test.ts tests/*.test.mjs",
     "db:migrate": "node --env-file=.env --import tsx apps/api/src/migrate.ts",
     "infra:up": "docker compose up -d --build",
     "infra:check": "docker compose config --quiet",
