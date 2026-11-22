@@ -174,3 +174,18 @@ La facciata non risolve da sola DNS/TLS del deployment: issuer canonico, URL cat
 L’issuer canonico resta quello approvato: URL di autorizzazione nel browser, confronto `iss`, audience, nonce e PKCE non vengono riscritti né disattivati. Un esempio Docker locale è issuer `http://localhost:8080/realms/eulab` e origine di trasporto `https://nginx`, con CA attendibile e relay privato verso il medesimo Keycloak. Non usare il parametro per collegare un provider diverso dall’issuer approvato.
 
 Correzione del 24 ottobre adottata per il problema di raggiungibilità rilevato in ALORA dopo la migrazione. Compilazione/pacchetto aggiornati; il login end-to-end viene riprovato dall’utente, non è dichiarato collaudato da questa modifica.
+
+## Candidata 0.11.0 — account squadra
+
+La candidata aggiunge `application.team.createUser(sessionId, input)`, usando la stessa istanza e la sessione backend già approvata. L'input contiene il profilo locale persistito (`localUserId`, email, nome/cognome, ruolo operativo e permessi), i `roleIds` esplicitamente scelti e una password iniziale facoltativa. Sorgente e azienda locale derivano dalla configurazione/sessione; lo username è generato se omesso. Non aggiungere un signup parallelo o chiamate amministrative nel browser.
+
+Richiede API Connect aggiornata, migrazione 014 e bootstrap degli attributi provider riservati. La creazione conserva le restrizioni di licenza/delega e non sostituisce revisioni o riattivazioni amministrative. Risultato tipizzato `ApplicationTeamUserResult`; errori `ConnectApiError` con `status` e `code`. I rifiuti di business conservano la sessione operatore; nessun reinvio automatico di password o mutazioni dopo esiti incerti. `ssoSetupRequired` segnala eventuali azioni provider ancora necessarie.
+
+La distribuzione npm 0.10.0 non contiene questo metodo. Questa candidata non comporta pubblicazione automatica. Specifica completa ed evidenze nel repository Connect: `docs/DELEGATED-ACCOUNTS-STEP-5.md`.
+
+
+## Automazioni appuntamenti — 0.12.0
+
+Il contratto server aggiuntivo è in [AUTOMATIONS.md](./AUTOMATIONS.md): `ConnectServer.automations(token)` per consenso/recupero, `ConnectServer.automations()` per worker con credenziale delegata. Richiede schema 015 e API/runner aggiornati insieme. La facciata esistente `services(sessionId, callback)` permette l’autorizzazione iniziale senza esportare token al browser. Persisti grant e segreto webhook cifrati nel backend; al browser proietta soltanto stato, scadenza e motivo sicuro. Non usare refresh token UI per job differiti e non cambiare chiave dopo un esito incerto.
+
+La versione 0.12.0 aggiunge `client.automations().withdraw(id, credential, originalInput, originalKey)`. Usa gli stessi dati/chiave di `send`, senza token browser. Una ricevuta `cancelled` preventiva impedisce il commit tardivo di un nuovo invio; `sending`/`sent`/`uncertain` producono `effect_started`, senza annullamento promesso o reinvio. Contratto e unione tipizzata `DelegatedMessageWithdrawal` in [AUTOMATIONS.md](./AUTOMATIONS.md#ritiro-del-singolo-comando-0120-rc2). Nessuna nuova migrazione oltre allo schema 015.

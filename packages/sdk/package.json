@@ -1,6 +1,6 @@
 {
   "name": "@eulab/connect",
-  "version": "0.10.0",
+  "version": "0.12.0",
   "description": "SDK EULab Connect per browser e server: SSO, permessi e WhatsApp",
   "author": "EULAB",
   "type": "module",
@@ -34,9 +34,15 @@
     "!dist/**/*.map",
     "examples",
     "migrations",
-    "INTEGRATION.md"
+    "INTEGRATION.md",
+    "AUTOMATIONS.md"
   ],
   "dependencies": {
     "jose": "^6.2.12"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Eulab-EugenioRenna/connect.git",
+    "directory": "packages/sdk"
   }
 }

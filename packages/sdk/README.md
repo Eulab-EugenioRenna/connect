@@ -1,3 +1,12 @@
+### Novità 0.12.0
+
+- Prima versione stabile della linea 0.12 (contenuto della 0.12.0-rc.2 provata in ALORA).
+- Client browser: le risposte non JSON dei proxy (502/503/504) diventano messaggi chiari invece di errori di parsing.
+
+## Automazioni server 0.12.0
+
+Delega revocabile, invio/stato e ritiro idempotente del singolo comando sulla stessa outbox, webhook recuperabili: [contratto API/SDK](./AUTOMATIONS.md). Richiede schema Connect 015; candidato locale, non pubblicato. Le credenziali restano nel backend; le API manuali e bot esistenti restano disponibili.
+
 ## Facciata applicativa 0.10.0
 
 `@eulab/connect/application` esporta `ConnectApplication` e lo store PostgreSQL condiviso. Una sola istanza governa discovery, migrazione/attivazione, recupero password, OIDC/PKCE, cookie/handoff, sessioni cifrate e rinnovi concorrenti. I metodi 0.9.0 restano compatibili.
@@ -61,3 +70,7 @@ if (lookup.status === 'not_found') {
 `loginContext` non autentica l’utente e restituisce un contesto solo per collegamenti espliciti autorizzati alla sorgente. `submit` accetta `Idempotency-Key` stabili: la stessa chiave con lo stesso body restituisce la pratica esistente, con un body diverso produce un errore 409 e non sostituisce la credenziale. `ConnectOnboardingError.status` conserva il codice HTTP (401/403/409/...) per la gestione consumer. La password transitoria non viene mai restituita, registrata o inclusa nei tipi di risposta.
 
 Le API `/v1/team` sono esposte da `teamOverview`, `teamUsers`, `teamRoles`, `teamFunctions`, `createTeamRole`, `updateTeamRole`, `deleteTeamRole`, `setTeamUserRoles`, `revokeTeamUser` e `restoreTeamUser`. Cliente e applicazione derivano dall’installazione autenticata; ogni assegnazione resta limitata a funzioni attive, licenziate e presenti nella delega del chiamante. Le operazioni di modifica richiedono `team.manage` nella delega effettiva.
+
+### Candidata 0.11.0: creazione account delegata
+
+La facciata server espone `application.team.createUser(sessionId, {localUser, roleIds, initialPassword?})`. Il consumer fornisce un profilo con ID locale già persistito; lo SDK ricava sorgente/azienda dalla sessione e configura il mirror completo senza esporre credenziali nel browser. Servono API aggiornata, migrazione 014, bootstrap provider e `team.manage` effettivo. Errori di business tipizzati conservano la sessione; esiti incerti richiedono verifica e azione esplicita sullo stesso ID. Vedi `INTEGRATION.md` e la consegna `docs/DELEGATED-ACCOUNTS-STEP-5.md` nel repository. Il metodo non è disponibile nella distribuzione 0.10.0.

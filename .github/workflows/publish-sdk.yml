@@ -1,0 +1,47 @@
+# Pubblica @eulab/connect su npm (profilo P3 del modello EULAB, §14).
+# Parte da un tag "sdk-v<versione>" (es. sdk-v0.12.0) che deve coincidere con packages/sdk/package.json.
+# Trusted publishing: npm si fida di questo workflow (configurato su npmjs.com → pacchetto → Settings
+# → Trusted publisher: GitHub Actions, repo Eulab-EugenioRenna/connect, workflow publish-sdk.yml,
+# environment npm). Nessun token npm salvato in GitHub. Provenance generata automaticamente.
+# Le versioni con trattino (es. 0.13.0-rc.1) escono con il tag npm "next", le altre con "latest".
+name: publish-sdk
+
+on:
+  push:
+    tags: ["sdk-v*"]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-sdk
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      # Il trusted publishing richiede npm 11.5.1 o successivo.
+      - run: npm install -g npm@^11.5.1
+      - run: npm ci
+      - run: npm test
+      - name: Versione del tag = versione del pacchetto
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME#sdk-v}"
+          pkg="$(node -p "require('./packages/sdk/package.json').version")"
+          echo "tag=$tag pacchetto=$pkg"
+          [ "$tag" = "$pkg" ] || { echo "Il tag non coincide con packages/sdk/package.json"; exit 1; }
+          case "$pkg" in *-*) echo "dist=next" >> "$GITHUB_OUTPUT";; *) echo "dist=latest" >> "$GITHUB_OUTPUT";; esac
+      - name: Pubblica
+        working-directory: packages/sdk
+        run: npm publish --access public --tag "${{ steps.version.outputs.dist }}"
