@@ -33,14 +33,14 @@
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
       "redirectUris": [
-        "https://auth.eulab.cloud/admin/"
+        "https://connect.eulab.cloud/admin/"
       ],
       "webOrigins": [
-        "https://auth.eulab.cloud"
+        "https://connect.eulab.cloud"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "https://auth.eulab.cloud/admin/",
+        "post.logout.redirect.uris": "https://connect.eulab.cloud/admin/",
         "oauth2.device.authorization.grant.enabled": "false"
       },
       "protocolMappers": [

@@ -87,3 +87,4 @@ COPY infra/nginx.conf /etc/nginx/conf.d/default.conf
 FROM nginx:1.28.0-alpine AS web-production
 COPY --from=web-build /connect/dist/web /usr/share/nginx/html/admin
 COPY infra/production/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY infra/production/web-config.js /usr/share/nginx/html/admin/config.js

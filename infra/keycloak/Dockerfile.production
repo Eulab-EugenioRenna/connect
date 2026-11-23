@@ -6,3 +6,6 @@ FROM quay.io/keycloak/keycloak:26.3.3
 COPY --from=provider --chown=keycloak:keycloak /build/target/connect-mfa-0.1.0.jar /opt/keycloak/providers/connect-mfa.jar
 ENV KC_DB=postgres KC_HEALTH_ENABLED=true KC_HTTP_RELATIVE_PATH=/sso
 RUN /opt/keycloak/bin/kc.sh build
+# Realm and theme baked in: the production host needs no repository files.
+COPY --chown=keycloak:keycloak infra/keycloak/realm.production.json /opt/keycloak/data/import/eulab-realm.json
+COPY --chown=keycloak:keycloak infra/keycloak/themes/eulab /opt/keycloak/themes/eulab

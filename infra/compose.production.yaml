@@ -33,7 +33,7 @@ services:
   environment:
    <<: *production-oidc
    KEYCLOAK_INTERNAL_URL: http://keycloak:8080/sso
-   PUBLIC_CONNECT_URL: https://auth.eulab.cloud
+   PUBLIC_CONNECT_URL: https://connect.eulab.cloud
  runner:
   environment: *production-oidc
  web:

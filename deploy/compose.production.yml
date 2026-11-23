@@ -1,0 +1,122 @@
+# Connect in produzione dal profilo P1 del modello EULAB (§14): solo immagini GHCR, nessun sorgente sul server.
+# Immagini costruite da .github/workflows/deploy.yml con tag = commit (CONNECT_IMAGE_TAG).
+# Segreti e configurazione: /srv/connect/.env.production (chmod 600), passato con --env-file da deploy/scripts/deploy.sh.
+# Ogni servizio riceve solo le variabili che usa, come in compose.yaml.
+name: eulab-connect-production
+x-common: &common
+  DATABASE_URL: postgres://connect:${POSTGRES_PASSWORD:?}@postgres:5432/connect
+  REDIS_URL: redis://:${REDIS_PASSWORD:?}@redis:6379
+  OIDC_ISSUER: https://auth.eulab.cloud/sso/realms/eulab
+  OIDC_INTERNAL_ISSUER: http://keycloak:8080/sso/realms/eulab
+  OIDC_JWKS_URL: http://keycloak:8080/sso/realms/eulab/protocol/openid-connect/certs
+  DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?}
+  OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?}
+  OIDC_IDENTITY_ADMIN_SECRET: ${OIDC_IDENTITY_ADMIN_SECRET:?}
+services:
+  postgres:
+    image: postgres:17.6-bookworm
+    environment:
+      POSTGRES_USER: connect
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: connect
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    networks: [data]
+    healthcheck: {test: [CMD-SHELL, pg_isready -U connect -d connect], interval: 5s, retries: 20}
+    restart: unless-stopped
+  redis:
+    image: redis:7.4.5-alpine
+    command: [sh, -c, 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
+    environment: {REDIS_PASSWORD: '${REDIS_PASSWORD:?}'}
+    volumes: [redis-data:/data]
+    networks: [data]
+    healthcheck: {test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep PONG'], interval: 5s, retries: 20}
+    restart: unless-stopped
+  migrate:
+    image: ${CONNECT_REGISTRY:-ghcr.io/eulab-eugeniorenna}/connect-migrate:${CONNECT_IMAGE_TAG:?}
+    environment: *common
+    depends_on: {postgres: {condition: service_healthy}}
+    networks: [data]
+  keycloak:
+    image: ${CONNECT_REGISTRY:-ghcr.io/eulab-eugeniorenna}/connect-keycloak:${CONNECT_IMAGE_TAG:?}
+    command: [start, --optimized, --import-realm]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/connect
+      KC_DB_USERNAME: connect
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:?}
+      KC_DB_SCHEMA: keycloak
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-eulab-operator}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?}
+      KC_HOSTNAME: https://auth.eulab.cloud/sso
+      KC_HOSTNAME_STRICT: 'true'
+      KC_HTTP_RELATIVE_PATH: /sso
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: 'true'
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?}
+    depends_on: {migrate: {condition: service_completed_successfully}}
+    networks: [data, edge]
+    restart: unless-stopped
+  bootstrap:
+    image: ${CONNECT_REGISTRY:-ghcr.io/eulab-eugeniorenna}/connect-bootstrap:${CONNECT_IMAGE_TAG:?}
+    environment:
+      <<: *common
+      CONNECT_BOOTSTRAP: 'true'
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080/sso
+      PUBLIC_CONNECT_URL: https://connect.eulab.cloud
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-eulab-operator}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?}
+      EULAB_ADMIN_USERNAME: ${EULAB_ADMIN_USERNAME:-admin}
+      EULAB_ADMIN_EMAIL: ${EULAB_ADMIN_EMAIL:?}
+      EULAB_ADMIN_NAME: ${EULAB_ADMIN_NAME:-Amministratore EULab}
+      EULAB_ADMIN_PASSWORD: ${EULAB_ADMIN_PASSWORD:?}
+    depends_on:
+      keycloak: {condition: service_started}
+      migrate: {condition: service_completed_successfully}
+    networks: [data]
+  api:
+    image: ${CONNECT_REGISTRY:-ghcr.io/eulab-eugeniorenna}/connect-api:${CONNECT_IMAGE_TAG:?}
+    environment:
+      <<: *common
+      MIGRATION_ENCRYPTION_KEY: ${MIGRATION_ENCRYPTION_KEY:?}
+      ONBOARDING_PASSWORD_TTL_SECONDS: ${ONBOARDING_PASSWORD_TTL_SECONDS:-86400}
+      CATALOG_INTERNAL_ORIGINS_JSON: ${CATALOG_INTERNAL_ORIGINS_JSON:-{}}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_SECURITY: ${SMTP_SECURITY:-starttls}
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+      bootstrap: {condition: service_completed_successfully}
+    networks: [data, edge]
+    restart: unless-stopped
+  runner:
+    image: ${CONNECT_REGISTRY:-ghcr.io/eulab-eugeniorenna}/connect-runner:${CONNECT_IMAGE_TAG:?}
+    environment:
+      <<: *common
+      RUNNER_ID: runner-1
+      RUNNER_CAPACITY: ${RUNNER_CAPACITY:-2}
+    volumes: [openwa-profiles-1:/profiles]
+    shm_size: 1gb
+    init: true
+    depends_on:
+      bootstrap: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    networks: [data, edge]
+    restart: unless-stopped
+  web:
+    image: ${CONNECT_REGISTRY:-ghcr.io/eulab-eugeniorenna}/connect-web:${CONNECT_IMAGE_TAG:?}
+    ports: ['${CONNECT_BIND_IP:?}:${CONNECT_HTTP_PORT:-8088}:80']
+    environment: {NPM_TRUSTED_CIDR: '${NPM_TRUSTED_CIDR:?}'}
+    depends_on: [api, keycloak]
+    networks: [edge]
+    restart: unless-stopped
+volumes:
+  postgres-data:
+  redis-data:
+  openwa-profiles-1:
+networks:
+  data: {internal: true}
+  edge: {}

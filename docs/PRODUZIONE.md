@@ -1,18 +1,27 @@
-# Produzione: auth.eulab.cloud
+# Produzione: connect.eulab.cloud e auth.eulab.cloud
 
-Configurazione preparata, senza deploy, modifiche DNS o richieste di certificati.
+Deploy con il profilo P1 del modello EULAB (§14): immagini runtime su GHCR costruite da GitHub Actions, nessun sorgente né build sul server. Server: container Proxmox LXC 123 `connect` (192.168.2.228), ingresso da Nginx Proxy Manager (LXC 103, 192.168.2.49).
 
 ## Indirizzi
 
 | Servizio | URL pubblico |
 | --- | --- |
-| Pannello Connect | `https://auth.eulab.cloud/admin/` |
-| API / SDK server | `https://auth.eulab.cloud` (endpoint `/v1/...`) |
+| Pannello Connect | `https://connect.eulab.cloud/admin/` |
+| API / SDK server | `https://connect.eulab.cloud` (endpoint `/v1/...`) |
 | Issuer SSO SDK e WordPress | `https://auth.eulab.cloud/sso/realms/eulab` |
-| Callback e logout del pannello | `https://auth.eulab.cloud/admin/` |
-| Installer WordPress | `https://auth.eulab.cloud/admin/downloads/euconnect.php` |
+| Callback e logout del pannello | `https://connect.eulab.cloud/admin/` |
+| Installer WordPress | `https://connect.eulab.cloud/admin/downloads/euconnect.php` |
 
-Il client SSO `connect-admin` accetta il callback esatto e l’origine HTTPS di produzione. La copia di realm per produzione esclude il client demo locale. Gli URL di callback delle app dei clienti e dei siti WordPress devono essere registrati con il loro dominio reale.
+La console di amministrazione di Keycloak (`/sso/admin/`) non è pubblica: Connect la usa dalla rete interna (`http://keycloak:8080/sso`).
+
+## Deploy (profilo P1)
+
+- `deploy/compose.production.yml`: solo immagini `ghcr.io/eulab-eugeniorenna/connect-{api,bootstrap,migrate,runner,web,keycloak}:<commit>`. Realm, tema e `config.js` sono dentro le immagini.
+- `/srv/connect/.env.production` (600) si crea sul server con `deploy/scripts/init-env.sh <ip> <cidr-npm> <email-admin>`: i segreti nascono lì e non vengono stampati. Conservare a parte `DATA_ENCRYPTION_KEY`.
+- `deploy/scripts/deploy.sh <commit>`: controlli sul file ambiente, pull, backup (`backup.sh`: dump del database con lo schema Keycloak e profili WhatsApp), avvio, controllo di salute interno su `/admin/`, `/v1/health` e discovery OIDC.
+- `.github/workflows/deploy.yml`: su `main` costruisce le immagini; il job `production` gira sul runner self-hosted `connect-production` dopo l'approvazione nell'environment `production`, ed è spento finché `CONNECT_DEPLOY_ENABLED` non vale `true`. Ritorno indietro: `workflow_dispatch` con il tag precedente (`/srv/connect/previous-tag`).
+
+Le sezioni che seguono descrivono la preparazione storica dal pacchetto sorgente: il percorso corrente è quello sopra.
 
 ## Ingresso esistente: Cloudflare Tunnel e NPM remoto
 

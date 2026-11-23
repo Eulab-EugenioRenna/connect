@@ -1,19 +1,23 @@
 map $http_upgrade $connection_upgrade { default upgrade; '' close; }
-# Upstream for the existing Nginx Proxy Manager / Cloudflare Tunnel.
+# Upstream for the existing Cloudflare Tunnel → Nginx Proxy Manager.
 # No public TLS listener: HTTPS terminates in the existing ingress.
+# Two public hosts on the same internal port:
+#  - connect.eulab.cloud: panel /admin/ and API/SDK /v1/
+#  - auth.eulab.cloud:    Keycloak under /sso/ (admin console not public)
 limit_req_zone $binary_remote_addr zone=connect:10m rate=15r/s;
 server {
- listen 80;
- server_name auth.eulab.cloud;
+ listen 80 default_server;
+ server_name connect.eulab.cloud;
  allow ${NPM_TRUSTED_CIDR};
+ allow 127.0.0.1; # health check di deploy/scripts/deploy.sh dentro il container
  deny all;
  root /usr/share/nginx/html;
  client_max_body_size 15m;
  add_header X-Content-Type-Options nosniff always;
  add_header Referrer-Policy no-referrer always;
  add_header X-Frame-Options DENY always;
- location = / { return 308 https://auth.eulab.cloud/admin/; }
- location = /admin { return 308 https://auth.eulab.cloud/admin/; }
+ location = / { return 308 https://connect.eulab.cloud/admin/; }
+ location = /admin { return 308 https://connect.eulab.cloud/admin/; }
  location = /admin/downloads/euconnect.php {
   default_type application/octet-stream;
   add_header Content-Disposition 'attachment; filename="euconnect.php"';
@@ -28,10 +32,25 @@ server {
   proxy_set_header Upgrade $http_upgrade;
   proxy_set_header Connection $connection_upgrade;
   proxy_read_timeout 75s;
-  proxy_set_header Host auth.eulab.cloud;
+  proxy_set_header Host connect.eulab.cloud;
   proxy_set_header X-Forwarded-Proto https;
   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
  }
+ # SSO moved to its own host.
+ location /sso/ { return 308 https://auth.eulab.cloud$request_uri; }
+ location / { return 404; }
+}
+server {
+ listen 80;
+ server_name auth.eulab.cloud;
+ allow ${NPM_TRUSTED_CIDR};
+ allow 127.0.0.1; # health check di deploy/scripts/deploy.sh dentro il container
+ deny all;
+ add_header X-Content-Type-Options nosniff always;
+ add_header Referrer-Policy no-referrer always;
+ location = / { return 308 https://connect.eulab.cloud/admin/; }
+ # Keycloak admin console and admin REST API stay internal (Connect uses http://keycloak:8080).
+ location /sso/admin/ { return 403; }
  location /sso/ {
   proxy_pass http://keycloak:8080;
   proxy_set_header Host auth.eulab.cloud;

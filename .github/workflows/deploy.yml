@@ -1,0 +1,93 @@
+# Profilo P1 del modello EULAB (§14): Docker → Proxmox.
+# 1. "images": su GitHub costruisce le immagini runtime e le pubblica su GHCR con tag = commit.
+# 2. "production": sul runner self-hosted nel container Connect (LXC 123) esegue deploy/scripts/deploy.sh,
+#    solo dopo l'approvazione di Eugenio nell'environment GitHub "production".
+# Il job di deploy resta spento finché la variabile di repository CONNECT_DEPLOY_ENABLED non vale "true".
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag immagine da installare (commit). Vuoto = commit corrente. Serve anche per tornare indietro."
+        required: false
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io/eulab-eugeniorenna
+
+jobs:
+  images:
+    if: github.event_name == 'push' || inputs.tag == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - {name: api, file: Dockerfile, target: api}
+          - {name: bootstrap, file: Dockerfile, target: bootstrap}
+          - {name: migrate, file: Dockerfile, target: migrate}
+          - {name: runner, file: Dockerfile, target: runner}
+          - {name: web, file: Dockerfile, target: web-production}
+          - {name: keycloak, file: infra/keycloak/Dockerfile.production, target: ""}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
+          build-args: EULAB_ADMIN_BASE_PATH=/admin/
+          push: true
+          tags: ${{ env.REGISTRY }}/connect-${{ matrix.name }}:${{ github.sha }}
+          cache-from: type=gha,scope=connect-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=connect-${{ matrix.name }}
+
+  production:
+    needs: images
+    if: >-
+      always() && vars.CONNECT_DEPLOY_ENABLED == 'true' &&
+      (needs.images.result == 'success' || needs.images.result == 'skipped')
+    runs-on: [self-hosted, linux, connect-production]
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://connect.eulab.cloud/admin/
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.sha }}
+          sparse-checkout: deploy
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Deploy
+        run: deploy/scripts/deploy.sh "${{ inputs.tag || github.sha }}"
+      - name: Controllo pubblico
+        run: |
+          for url in https://connect.eulab.cloud/admin/ https://connect.eulab.cloud/v1/health \
+                     https://auth.eulab.cloud/sso/realms/eulab/.well-known/openid-configuration; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$url")
+            echo "$url -> $code"
+            [ "$code" = 200 ] || exit 1
+          done
