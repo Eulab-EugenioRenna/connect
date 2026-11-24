@@ -97,9 +97,9 @@ services:
     environment:
       <<: *common
       RUNNER_ID: runner-1
-      RUNNER_CAPACITY: ${RUNNER_CAPACITY:-2}
+      RUNNER_CAPACITY: ${RUNNER_CAPACITY:-10}
     volumes: [openwa-profiles-1:/profiles]
-    shm_size: 1gb
+    shm_size: 2gb
     init: true
     depends_on:
       bootstrap: {condition: service_completed_successfully}
