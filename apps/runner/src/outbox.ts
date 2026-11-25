@@ -6,6 +6,7 @@ import {AutomationService} from '../../api/src/automation.service.js';
 import {WhatsAppBotService} from '../../api/src/whatsapp-bot.service.js';
 import {introspect} from '../../api/src/oidc.js';
 import {unseal} from '../../api/src/security.js';
+import {ProviderRejected} from './openwa.js';
 
 /** A queue item carries only the persisted outbox ID. Provider failures are never retried. */
 export async function runOutbox(db:Database,id:string,runner:string,getEffect: (sessionId:string)=>Promise<((payload:any)=>Promise<string>)|undefined>,automations=new AutomationService(db,new IdentitiesService(db))){
@@ -51,8 +52,17 @@ export async function runOutbox(db:Database,id:string,runner:string,getEffect: (
    await tx.query('INSERT INTO deliveries(id,event_id,endpoint_id) SELECT gen_random_uuid(),$1,id FROM webhook_endpoints WHERE installation_id=$2 AND enabled=true',[eventId,claimed.installation_id]);
   });
   return {outbox:claimed,providerId};
- }catch{
-  await db.query("UPDATE outbox SET state='uncertain',error='Esito provider non confermato; nessun reinvio automatico' WHERE id=$1 AND state='sending'",[id]);
+ }catch(error){
+  // Only a known code is kept: provider messages can carry numbers or credentials.
+  const message=error instanceof Error?error.message:'',code=(error as {code?:unknown})?.code;
+  const reason=/^[A-Z_]{3,60}$/.test(message)?message:typeof code==='string'&&/^[A-Z_]{3,60}$/.test(code)?code:'PROVIDER_ERROR';
+  if(error instanceof ProviderRejected||(error as {outcome?:unknown})?.outcome==='not_sent'){
+   await db.query("UPDATE outbox SET state='failed',error='provider_rejected' WHERE id=$1 AND state='sending'",[id]);
+   console.warn(JSON.stringify({component:'outbox',level:'warn',message:'outbox_rejected',outboxId:id,reason}));return;
+  }
+  // The reason is kept (without phone numbers) so «uncertain» can be explained; still never resent automatically.
+  await db.query("UPDATE outbox SET state='uncertain',error=$2 WHERE id=$1 AND state='sending'",[id,`Esito provider non confermato; nessun reinvio automatico (${reason})`]);
+  console.warn(JSON.stringify({component:'outbox',level:'warn',message:'outbox_uncertain',outboxId:id,reason}));
  }
 }
 /** Reclaiming a process never reclaims an effect: both pre/post-effect crashes stay uncertain. */

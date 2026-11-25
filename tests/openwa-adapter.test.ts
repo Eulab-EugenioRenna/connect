@@ -59,14 +59,23 @@ test('OpenWAUnlocked: un avvio fallito chiude il client e rimuove listener e avv
  await adapter.cancelPending(sessionId);assert.equal(stops.length,1);
 }));
 
-test('OpenWAUnlocked: media e sondaggi conservano parametri e ID, i booleani restano non confermati',async()=>fixture(async({adapter,calls,setResult})=>{
+test('OpenWAUnlocked: gli invii dello stesso numero partono uno alla volta',async()=>fixture(async({adapter,calls})=>{
+ const client=await adapter.create(sessionId,async()=>{});
+ let active=0,peak=0;const original=client.sendFile;
+ client.sendFile=async(...args:any[])=>{active++;peak=Math.max(peak,active);await new Promise(r=>setTimeout(r,5));active--;return original(...args);};
+ await Promise.all([1,2,3,4].map(()=>adapter.send(client,{kind:'image',to:'123@c.us',data:'data:image/png;base64,AA==',filename:'p.png'})));
+ assert.equal(peak,1);assert.equal(calls.length,4);
+}));
+
+test('OpenWAUnlocked: media e sondaggi conservano parametri e ID, true resta non confermato, false è un rifiuto',async()=>fixture(async({adapter,calls,setResult})=>{
  const client=await adapter.create(sessionId,async()=>{});
  const id=await adapter.send(client,{kind:'image',to:'123@c.us',data:'data:image/png;base64,AA==',filename:'photo.png',caption:'Foto'});
  assert.equal(id,'true_123@c.us_message');
  assert.deepEqual(calls[0],['file','123@c.us','data:image/png;base64,AA==','photo.png',{caption:'Foto'}]);
  await adapter.send(client,{kind:'poll',to:'123@c.us',question:'Quando?',options:['Oggi','Domani']});
  assert.deepEqual(calls[1],['poll','123@c.us','Quando?',['Oggi','Domani']]);
- for(const result of [true,false,'','ERROR_FAILURE']){
+ setResult(false);await assert.rejects(adapter.send(client,{kind:'document',to:'123@c.us',data:'data',filename:'a.pdf'}),/PROVIDER_REJECTED/);
+ for(const result of [true,'','ERROR_FAILURE']){
   setResult(result);await assert.rejects(adapter.send(client,{kind:'document',to:'123@c.us',data:'data',filename:'a.pdf'}),/PROVIDER_RESULT_UNCONFIRMED/);
  }
  setResult('true_123@c.us_interactive');

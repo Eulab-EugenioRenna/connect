@@ -3,6 +3,8 @@ import {mkdir,rm} from 'node:fs/promises';
 import path from 'node:path';
 import {required} from '../../api/src/config.js';
 import {readChatIds} from './openwa-history.js';
+/** The provider said no before sending anything: the message did not leave. */
+export class ProviderRejected extends Error {}
 export interface WaClient {
  sendInteractive(to:string,content:InteractiveContent):Promise<string>;
  onInteractiveResponse(fn:(response:InteractiveResponse)=>void):Promise<unknown>;
@@ -75,12 +77,28 @@ export class OpenWaAdapter {
  async cancelPending(id?:string){if(id){await this.pending.get(id)?.();return;}await Promise.allSettled([...this.pending.values()].map(stop=>stop()));}
  profile(id:string){if(!/^[a-f0-9-]{36}$/.test(id))throw new Error('ID sessione non valido');return path.join(required('OPENWA_PROFILE_DIR'),id);}
  async removeAuthentication(id:string){await rm(this.profile(id),{recursive:true,force:true});}
- async send(client:WaClient,p:any):Promise<string>{
+ /** One send at a time per WhatsApp number: media confirmations are matched by file size, so parallel sends of the same photo steal each other's confirmation. */
+ private sending=new WeakMap<WaClient,Promise<unknown>>();
+ static sendTimeoutMs=90_000;
+ send(client:WaClient,p:any):Promise<string>{
+  const previous=this.sending.get(client)??Promise.resolve();
+  const run=previous.catch(()=>undefined).then(()=>{
+   let timer:NodeJS.Timeout|undefined;
+   // A confirmation that never comes must not hold the line for the next messages.
+   const timeout=new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('PROVIDER_TIMEOUT')),OpenWaAdapter.sendTimeoutMs);});
+   return Promise.race([this.sendNow(client,p),timeout]).finally(()=>clearTimeout(timer));
+  });
+  this.sending.set(client,run.catch(()=>undefined));
+  return run;
+ }
+ private async sendNow(client:WaClient,p:any):Promise<string>{
   let result:unknown;
   switch(p.kind){case 'text':result=await client.sendText(p.to,p.text);break;
    case 'image':case 'document':case 'audio':case 'video':result=await client.sendFile(p.to,p.data,p.filename,p.caption||'');break;
    case 'poll':result=await client.sendPoll(p.to,p.question,p.options);break;
    case 'interactive':result=await client.sendInteractive(p.to,p.content);break;default:throw new Error('UNSUPPORTED_MESSAGE');}
+  // false: WhatsApp refused before sending (chat not found). Never sent, safe to report as failed.
+  if(result===false)throw new ProviderRejected('PROVIDER_REJECTED');
   if(typeof result!=='string'||!result||result.startsWith('ERROR'))throw new Error('PROVIDER_RESULT_UNCONFIRMED');return result;
  }
 }
