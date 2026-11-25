@@ -1,6 +1,6 @@
 {
   "name": "@eulab/connect",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "SDK EULab Connect per browser e server: SSO, permessi e WhatsApp",
   "author": "EULAB",
   "type": "module",

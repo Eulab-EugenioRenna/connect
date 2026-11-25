@@ -16,7 +16,11 @@ async function fixture(run:(context:any)=>Promise<void>){
  class Driver {}
  class Client {
   constructor(options:any){assert.equal(options.transport,'transport');}
-  async start(){events.emit('launch.auth.qr.generated',{details:{qr:'fixture-qr'}});if(startError)throw startError;}
+  async start(){
+   if(config.linkCode)events.emit('launch.auth.linkCode.generated',{details:{linkCode:'ab12cd34'}});
+   else events.emit('launch.auth.qr.generated',{details:{qr:'fixture-qr'}});
+   if(startError)throw startError;
+  }
   async stop(reason:string){stops.push(reason);}
   async sendInteractive(...args:any[]){calls.push(['interactive',...args]);return result;}
   async sendText(...args:any[]){calls.push(['text',...args]);return result;}
@@ -57,6 +61,14 @@ test('OpenWAUnlocked: un avvio fallito chiude il client e rimuove listener e avv
  assert.deepEqual(stops,['eulab-start-failed']);
  assert.equal(events.listenerCount('launch.auth.qr.generated'),0);
  await adapter.cancelPending(sessionId);assert.equal(stops.length,1);
+}));
+
+test('OpenWAUnlocked: collegamento con numero, codice da digitare sul telefono al posto del QR',async()=>fixture(async({adapter,config})=>{
+ let qr='',code='';
+ await adapter.create(sessionId,async(value:string)=>{qr=value;},{phone:'+39 333 123 4567',onLinkCode:async(value:string)=>{code=value;}});
+ assert.equal(config().linkCode,'393331234567');
+ await new Promise(r=>setImmediate(r));
+ assert.equal(code,'AB12CD34');assert.equal(qr,'');
 }));
 
 test('OpenWAUnlocked: gli invii dello stesso numero partono uno alla volta',async()=>fixture(async({adapter,calls})=>{

@@ -41,14 +41,15 @@ async function start(id:string){
    if(await redis.set(`owner:${id}`,token,'EX',20,'NX')!=='OK')return;
    leases.set(id,token);
    const [s]=await db.query('SELECT * FROM wa_sessions WHERE id=$1 AND runner_id=$2 AND closed_at IS NULL',[id,runner]);if(!s||s.state==='disconnecting')return;
-   await db.query("UPDATE wa_sessions SET state='pairing',qr=null WHERE id=$1",[id]);
-   client=await adapter.create(id,async qr=>{await db.query("UPDATE wa_sessions SET qr=$2 WHERE id=$1 AND state='pairing'",[id,qr]);});
+   await db.query("UPDATE wa_sessions SET state='pairing',qr=null,link_code=null WHERE id=$1",[id]);
+   client=await adapter.create(id,async qr=>{await db.query("UPDATE wa_sessions SET qr=$2 WHERE id=$1 AND state='pairing'",[id,qr]);},
+    s.link_phone?{phone:s.link_phone,onLinkCode:async code=>{await db.query("UPDATE wa_sessions SET link_code=$2 WHERE id=$1 AND state='pairing'",[id,code]);}}:undefined);
    if(stopping||!leases.has(id))throw new Error('OWNER_LOST');
    const number=(await client.getHostNumber()).replace(/\D/g,'');if(!number)throw new Error('NUMBER_MISSING');
    const session=await db.transaction(async tx=>{
      const locked=(await tx.query('SELECT * FROM wa_sessions WHERE id=$1 FOR UPDATE',[id])).rows[0];if(locked.state==='disconnecting')throw new Error('DISCONNECT_REQUESTED');
      const archive=(await tx.query('INSERT INTO wa_archives(id,installation_id,number) VALUES($1,$2,$3) ON CONFLICT(installation_id,number) DO UPDATE SET number=$3 RETURNING id',[randomUUID(),s.installation_id,number])).rows[0];
-     return (await tx.query("UPDATE wa_sessions SET number=$2,archive_id=$3,state='connected',qr=null,sync_status='running',sync_count=0 WHERE id=$1 RETURNING *",[id,number,archive.id])).rows[0];
+     return (await tx.query("UPDATE wa_sessions SET number=$2,archive_id=$3,state='connected',qr=null,link_code=null,sync_status='running',sync_count=0 WHERE id=$1 RETURNING *",[id,number,archive.id])).rows[0];
    });
    clients.set(id,client);session.bot_ready_at=Date.now();
    await client.onAnyMessage(m=>{void record(session,m,true).catch(()=>console.error('Persistenza messaggio fallita',id));});

@@ -37,8 +37,11 @@ export function whatsappClient(request:Request,installationId:string,realtime:Re
    control:(id:string,action:'accept'|'reject'|'end'|'mute',call:CallIdentity,muted=false,key=crypto.randomUUID())=>request<ProviderOperation<CallActionResult>>(session(id)+'/operations','POST',{kind:'call.'+action,call,...action==='mute'?{muted}:{}},{'Idempotency-Key':key})
   },
   refreshContact:(id:string,chatId:string)=>request<ProviderOperation<ConversationContact>>(session(id)+'/operations','POST',{kind:'contact.refresh',chatId},{'Idempotency-Key':crypto.randomUUID()}),
-  sessions:()=>request<WhatsAppSession[]>(root+'/sessions'),connect:()=>request<{id:string;state:string}>(root+'/sessions','POST'),
-  qr:(id:string)=>request<{state:string;qr:string|null}>(session(id)+'/qr'),
+  sessions:()=>request<WhatsAppSession[]>(root+'/sessions'),
+  /** With phone (international form) WhatsApp gives an 8-character code to type on the phone instead of a QR. */
+  connect:(options:{phone?:string}={})=>request<{id:string;state:string}>(root+'/sessions','POST',options),
+  /** linkCode: set while pairing by phone number; the phone asks for it in «Collega con il numero di telefono». */
+  qr:(id:string)=>request<{state:string;method:'qr'|'phone';qr:string|null;linkCode:string|null}>(session(id)+'/qr'),
   send:(id:string,payload:WhatsAppPayload,idempotencyKey=crypto.randomUUID())=>request<{id:string;state:string}>(session(id)+'/messages','POST',payload,{'Idempotency-Key':idempotencyKey}),
   test:(id:string,payload:WhatsAppPayload)=>request<{valid:boolean;kind:string;to:string;connected:boolean;sent:false}>(session(id)+'/messages/test','POST',payload),
   outbox:()=>request<{id:string;session_id:string;state:string;provider_id:string|null;error:string|null;created_at:string}[]>(root+'/outbox'),

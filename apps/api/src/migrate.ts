@@ -68,6 +68,10 @@ try {
       await db.query(await readFile('infra/postgres/015-automation-delegations.sql','utf8'));
       await db.query("INSERT INTO schema_migrations(version) VALUES('015')");
     }
+    if (!(await db.query("SELECT 1 FROM schema_migrations WHERE version='016'")).rowCount) {
+      await db.query(await readFile('infra/postgres/016-whatsapp-link-code.sql','utf8'));
+      await db.query("INSERT INTO schema_migrations(version) VALUES('016')");
+    }
   });
-  console.log('Migrazioni 001–015 verificate');
+  console.log('Migrazioni 001–016 verificate');
 } finally { await database.onModuleDestroy(); }

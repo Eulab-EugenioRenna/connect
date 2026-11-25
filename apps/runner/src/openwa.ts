@@ -25,13 +25,15 @@ export class OpenWaAdapter {
   const coreName='@eulab/openwaunlocked-core',clientName='@eulab/openwaunlocked-client',driverName='@eulab/openwaunlocked-driver-puppeteer',qrName='qrcode';
   return Promise.all([import(coreName),import(clientName),import(driverName),import(qrName)]);
  }
- async create(sessionId:string,onQR:(qr:string)=>Promise<void>):Promise<WaClient>{
+ /** link: number to pair with an 8-character code typed on the phone, instead of the QR. */
+ async create(sessionId:string,onQR:(qr:string)=>Promise<void>,link?:{phone:string;onLinkCode:(code:string)=>Promise<void>}):Promise<WaClient>{
   const [wa,clientModule,driverModule,qrModule]=await this.loadProvider();
   const profile=path.join(this.profile(sessionId),'openwaunlocked');await mkdir(profile,{recursive:true,mode:0o700});
   const core=await wa.createClient({sessionId,driver:new driverModule.PuppeteerDriver(),sessionDataPath:profile,
    sessionDataEncryptionKey:Buffer.from(required('DATA_ENCRYPTION_KEY'),'hex').toString('base64'),headless:true,executablePath:process.env.CHROMIUM_PATH,
    browserArgs:['--no-sandbox','--disable-dev-shm-usage'],allowDangerousBrowserArgs:true,
    qrTimeoutMs:180000,authTimeoutMs:180000,navigationTimeoutMs:60000,
+   ...(link?{linkCode:link.phone.replace(/\D/g,'')}:{}),
    logConsole:false,logConsoleErrors:false,
    deleteSessionDataOnLogout:true,killClientOnLogout:false});
   const raw=new clientModule.Client({client:core,transport:core.getTransport()});
@@ -41,9 +43,14 @@ export class OpenWaAdapter {
    void (async()=>{const qr=qrModule.default||qrModule;await onQR(await qr.toDataURL(value,{width:320,errorCorrectionLevel:'M'}));})().catch(()=>console.error('Persistenza QR fallita',sessionId));
   };
   core.events.on('launch.auth.qr.generated',qrListener);
+  const codeListener=(event:any)=>{
+   const value=event.details?.linkCode;if(!link||typeof value!=='string'||!/^[A-Z0-9-]{8,9}$/i.test(value))return;
+   void link.onLinkCode(value.toUpperCase()).catch(()=>console.error('Persistenza codice di collegamento fallita',sessionId));
+  };
+  core.events.on('launch.auth.linkCode.generated',codeListener);
   try{await raw.start();}
   catch(error){await raw.stop('eulab-start-failed').catch(()=>undefined);throw error;}
-  finally{core.events.off('launch.auth.qr.generated',qrListener);this.pending.delete(sessionId);}
+  finally{core.events.off('launch.auth.qr.generated',qrListener);core.events.off('launch.auth.linkCode.generated',codeListener);this.pending.delete(sessionId);}
   return {
    sendInteractive:(to,content)=>raw.sendInteractive(to,content),
    onInteractiveResponse:async fn=>raw.onInteractiveResponse(fn),

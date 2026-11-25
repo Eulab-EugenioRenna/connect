@@ -43,6 +43,8 @@ import {ConnectServer, verifyWebhook} from '@eulab/connect/server';
 
 Gli export browser e server includono le dichiarazioni TypeScript. Il pacchetto contiene solo JavaScript compilato, tipi e questo README; non contiene credenziali o profili WhatsApp. I segreti dell’installazione devono rimanere sul backend. Il backend deve verificare licenza e permessi per ogni operazione.
 
+Collegamento WhatsApp (dalla versione 0.13.0): `whatsapp.connect()` mostra il QR come prima; `whatsapp.connect({phone: '+39 333 1234567'})` collega con il numero di telefono. In quel caso `whatsapp.qr(id)` restituisce `linkCode` (8 caratteri) e `qr: null`: sul telefono si apre WhatsApp › Dispositivi collegati › Collega un dispositivo › «Collega con il numero di telefono» e si digita il codice. Per cambiare modalità si chiude la sessione in attesa e se ne apre una nuova.
+
 `ConnectServer.mirrorUser()` collega un utente locale a Connect. Il campo opzionale `initialPassword` proviene da una verifica locale appena conclusa, serve solo a inizializzare una nuova identità nel provider e non viene conservato da Connect. Non è disponibile nell’SDK browser.
 
 `ConnectOnboardingSource` (server, dalla versione 0.9.0) è il client backend del contratto di attivazione assistita. Richiede la credenziale bootstrap della sorgente, registrata da EULAB prima dell’app/installazione, e non deve essere usato nel browser:

@@ -11,6 +11,8 @@ import { RequestContext } from './auth.js';
 import { Authorization } from './authorization.js';
 import { parse, uuid, messageSchema } from './validation.js';
 import { seal,secret } from './security.js';
+/** Optional: the number to link with a code typed on the phone instead of scanning a QR. International form, e.g. +39 333 1234567. */
+const connectSchema=z.object({phone:z.string().trim().regex(/^\+?[\d\s().-]{8,24}$/).refine(v=>{const d=v.replace(/\D/g,'');return d.length>=8&&d.length<=15&&!d.startsWith('0');},'Numero in formato internazionale').optional()}).strict();
 @Controller('v1/installations/:installationId/whatsapp') @ApiTags('WhatsApp') @ApiBearerAuth()
 export class WhatsAppController {
  constructor(private readonly wa:WhatsAppService,private readonly db:Database,private readonly policy:Authorization) {}
@@ -18,13 +20,17 @@ export class WhatsAppController {
  @Get('sessions') async sessions(@Param('installationId') i:string,@Req() req:RequestContext) {
    await this.access(req,i,'whatsapp.read');return this.db.query(`SELECT s.id,s.number,s.archive_id,s.state,s.runner_id,s.sync_status,s.sync_count,s.sync_limit,s.created_at,s.closed_at,s.delete_requested,COALESCE(r.heartbeat_at>now()-interval '20 seconds',false) AS runner_online FROM wa_sessions s LEFT JOIN runners r ON r.id=s.runner_id WHERE s.installation_id=$1 ORDER BY s.created_at DESC`,[i]);
  }
- @Post('sessions') async connect(@Param('installationId') i:string,@Req() req:RequestContext){await this.access(req,i,'whatsapp.manage');return this.wa.start(i,req.principal);}
+ @Post('sessions') @ApiInput(connectSchema) async connect(@Param('installationId') i:string,@Req() req:RequestContext,@Body() body:unknown){
+   await this.access(req,i,'whatsapp.manage');
+   const input=parse(connectSchema,body??{});
+   return this.wa.start(i,req.principal,input.phone?input.phone.replace(/\D/g,''):null);
+ }
  @Post('sessions/:id/reconnect') async reconnect(@Param('installationId') i:string,@Param('id') id:string,@Req() req:RequestContext) {
    await this.access(req,i,'whatsapp.manage');parse(uuid,id);await this.wa.session(i,id);
-   return this.db.transaction(async db=>{const result=await db.query("UPDATE wa_sessions SET state='queued',qr=null WHERE id=$1 AND state='failed' AND closed_at IS NULL RETURNING id",[id]);if(!result.rowCount)throw new ForbiddenException('Riconnessione disponibile solo per sessioni interrotte');await audit(db,req.principal.subject!,'whatsapp.reconnect',id);return {id,state:'queued'};});
+   return this.db.transaction(async db=>{const result=await db.query("UPDATE wa_sessions SET state='queued',qr=null,link_code=null WHERE id=$1 AND state='failed' AND closed_at IS NULL RETURNING id",[id]);if(!result.rowCount)throw new ForbiddenException('Riconnessione disponibile solo per sessioni interrotte');await audit(db,req.principal.subject!,'whatsapp.reconnect',id);return {id,state:'queued'};});
  }
  @Get('sessions/:id/qr') async qr(@Param('installationId') i:string,@Param('id') id:string,@Req() req:RequestContext) {
-   await this.access(req,i,'whatsapp.manage');parse(uuid,id);const s=await this.wa.session(i,id);return {state:s.state,qr:s.state==='pairing'?s.qr:null};
+   await this.access(req,i,'whatsapp.manage');parse(uuid,id);const s=await this.wa.session(i,id);return {state:s.state,method:s.link_phone?'phone':'qr',qr:s.state==='pairing'&&!s.link_phone?s.qr:null,linkCode:s.state==='pairing'?s.link_code??null:null};
  }
  @Post('sessions/:id/disconnect') async disconnect(@Param('installationId') i:string,@Param('id') id:string,@Req() req:RequestContext){await this.access(req,i,'whatsapp.manage');parse(uuid,id);return this.wa.disconnect(i,id,req.principal);}
  @Get('archives') async archives(@Param('installationId') i:string,@Req() req:RequestContext) {await this.access(req,i,'whatsapp.read');return this.db.query('SELECT * FROM wa_archives WHERE installation_id=$1 ORDER BY created_at DESC',[i]);}

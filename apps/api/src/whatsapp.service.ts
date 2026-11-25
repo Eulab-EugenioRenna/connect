@@ -10,7 +10,8 @@ export class WhatsAppService implements OnModuleDestroy {
  private readonly queues=new Map<string,Queue>();
  constructor(private readonly db:Database) {}
  queue(runner:string) {let q=this.queues.get(runner);if(!q){q=new Queue(`wa-${runner}`,{connection:redisOptions()});this.queues.set(runner,q);}return q;}
- async start(installationId:string,p:Principal) {
+ /** linkPhone: digits of the number to link with a code instead of the QR. */
+ async start(installationId:string,p:Principal,linkPhone:string|null=null) {
    return this.db.transaction(async db=>{
      await db.query('SELECT pg_advisory_xact_lock(901272)');
      await db.query('SELECT id FROM installations WHERE id=$1 FOR UPDATE',[installationId]);
@@ -19,8 +20,8 @@ export class WhatsAppService implements OnModuleDestroy {
      const runner=(await db.query(`SELECT r.id FROM runners r WHERE heartbeat_at>now()-interval '20 seconds'
        AND (SELECT count(*) FROM wa_sessions s WHERE s.runner_id=r.id AND s.closed_at IS NULL)<r.capacity ORDER BY r.id LIMIT 1 FOR UPDATE OF r`)).rows[0];
      if(!runner)throw new ServiceUnavailableException('Nessun runner disponibile');
-     const id=randomUUID();await db.query("INSERT INTO wa_sessions(id,installation_id,runner_id,state) VALUES($1,$2,$3,'queued')",[id,installationId,runner.id]);
-     await audit(db,p.subject!,'whatsapp.connect',id,{installationId});return {id,state:'queued'};
+     const id=randomUUID();await db.query("INSERT INTO wa_sessions(id,installation_id,runner_id,state,link_phone) VALUES($1,$2,$3,'queued',$4)",[id,installationId,runner.id,linkPhone]);
+     await audit(db,p.subject!,'whatsapp.connect',id,{installationId,method:linkPhone?'link_code':'qr'});return {id,state:'queued'};
    });
  }
  async session(installationId:string,sessionId:string) {
