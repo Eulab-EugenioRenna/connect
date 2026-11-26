@@ -89,7 +89,7 @@ export interface WaClient {
  onIncomingCall(fn:(call:any)=>void):Promise<unknown>;
  operation(command:ProviderCommand):Promise<unknown>;
 
- getHostNumber():Promise<string>;getAllChats():Promise<any[]>;getAllMessagesInChat(id:string,includeMe:boolean,notifications:boolean):Promise<any[]>;
+ getHostNumber():Promise<string>;getAllChats():Promise<Array<{id:string;t?:number|null}>>;getAllMessagesInChat(id:string,includeMe:boolean,notifications:boolean):Promise<any[]>;
  onAnyMessage(fn:(m:any)=>void):Promise<unknown>;onStateChanged(fn:(state:string)=>void):Promise<unknown>;onAck(fn:(ack:any)=>void):Promise<unknown>;
  sendText(to:string,text:string):Promise<string>;sendFile(to:string,data:string,name:string,caption:string):Promise<string|boolean>;
  sendPoll(to:string,question:string,options:string[]):Promise<string|boolean>;

@@ -34,19 +34,18 @@ export class WhatsAppController {
  }
  @Post('sessions/:id/disconnect') async disconnect(@Param('installationId') i:string,@Param('id') id:string,@Req() req:RequestContext){await this.access(req,i,'whatsapp.manage');parse(uuid,id);return this.wa.disconnect(i,id,req.principal);}
  @Get('archives') async archives(@Param('installationId') i:string,@Req() req:RequestContext) {await this.access(req,i,'whatsapp.read');return this.db.query('SELECT * FROM wa_archives WHERE installation_id=$1 ORDER BY created_at DESC',[i]);}
- @Delete('archives/:id') async deleteArchive(@Param('installationId') i:string,@Param('id') id:string,@Req() req:RequestContext){
-   await this.access(req,i,'whatsapp.manage');parse(uuid,id);
-   return this.db.transaction(async tx=>{
-     await tx.query('SELECT id FROM installations WHERE id=$1 FOR UPDATE',[i]);
-     if(!(await tx.query('SELECT id FROM wa_archives WHERE id=$1 AND installation_id=$2 FOR UPDATE',[id,i])).rows.length)throw new NotFoundException();
-     await tx.query("UPDATE wa_sessions SET delete_requested=true,state=CASE WHEN closed_at IS NULL THEN 'disconnecting' ELSE state END,qr=null WHERE archive_id=$1",[id]);
-     const removed=await purgeWhatsApp(tx,i,id);await audit(tx,req.principal.subject!,'whatsapp.archive.delete'+(removed?'':'.requested'),id,{installationId:i});return {removed,state:removed?'deleted':'disconnecting'};
-   });
- }
+ /**
+  * Removing a connection never deletes history: a linked number is disconnected and its
+  * archive stays for the licence (linking the same number again continues it). Only a
+  * connection that never linked a number is removed entirely. History goes only with the licence.
+  */
  @Delete('sessions/:id') async deleteSession(@Param('installationId') i:string,@Param('id') id:string,@Req() req:RequestContext){
    await this.access(req,i,'whatsapp.manage');parse(uuid,id);const session=await this.wa.session(i,id);
-   if(session.archive_id)return this.deleteArchive(i,session.archive_id,req);
-   return this.db.transaction(async tx=>{await tx.query("UPDATE wa_sessions SET delete_requested=true,state=CASE WHEN closed_at IS NULL THEN 'disconnecting' ELSE state END,qr=null WHERE id=$1",[id]);const removed=await purgeWhatsApp(tx,i,null,id);await audit(tx,req.principal.subject!,'whatsapp.session.delete.requested',id);return {removed,state:removed?'deleted':'disconnecting'};});
+   if(session.archive_id){
+     if(!session.closed_at&&session.state!=='disconnecting')await this.wa.disconnect(i,id,req.principal);
+     return {removed:false,state:session.closed_at?'disconnected':'disconnecting',historyKept:true};
+   }
+   return this.db.transaction(async tx=>{await tx.query("UPDATE wa_sessions SET delete_requested=true,state=CASE WHEN closed_at IS NULL THEN 'disconnecting' ELSE state END,qr=null WHERE id=$1",[id]);const removed=await purgeWhatsApp(tx,i,null,id);await audit(tx,req.principal.subject!,'whatsapp.session.delete.requested',id);return {removed,state:removed?'deleted':'disconnecting',historyKept:true};});
  }
  @Get('archives/:id/messages') async messages(@Param('installationId') i:string,@Param('id') id:string,@Req() req:RequestContext,@Query('before') before?:string,@Query('chat') chat?:string) {
    await this.access(req,i,'whatsapp.read');parse(uuid,id);if(before)parse(uuid,before);if(chat)parse(z.string().max(100),chat);

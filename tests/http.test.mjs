@@ -91,20 +91,23 @@ test('Admin CRUD, audit query e WhatsApp: revoche, isolamento e cancellazione di
  const send=await h.request(root+`/sessions/${session}/messages`,'POST',{kind:'text',to:'+39 333 1234567',text:'Prova'},{'Idempotency-Key':'phone-number-test'});assert.equal(send.status,201);
  assert.equal((await h.store.query('SELECT payload FROM outbox'))[0].payload.to,'393331234567@c.us');
  assert.equal((await h.request(root+`/sessions/${session}/messages`,'POST',{kind:'text',to:'numero sbagliato',text:'Prova'},{'Idempotency-Key':'invalid-phone-test'})).status,400);
- assert.equal((await h.request(`/v1/installations/${i.installationId}`,'DELETE')).status,409);
  await h.store.query("INSERT INTO events(id,installation_id,session_id,kind,payload) VALUES($1,$2,$3,'test','{}')",[event,i.installationId,session]);
  await h.store.query("INSERT INTO webhook_endpoints(id,installation_id,url,secret_cipher) VALUES($1,$2,'https://webhook.example','test')",[endpoint,i.installationId]);
  await h.store.query('INSERT INTO deliveries(id,event_id,endpoint_id) VALUES($1,$2,$3)',[randomUUID(),event,endpoint]);
  const other=(await h.request('/v1/installations','POST',{customerId:c.id,appId:'crud',domain:'https://other.example'})).body;
  const otherRoot=`/v1/installations/${other.id}/whatsapp`;
+ // No history deletion through the WhatsApp API: removing a connection disconnects it, history stays.
  assert.equal((await h.request(otherRoot+`/archives/${archive}`,'DELETE')).status,404);
- const removed=await h.request(root+`/sessions/${session}`,'DELETE');assert.equal(removed.status,200);assert.equal(removed.body.state,'disconnecting');
+ assert.equal((await h.request(root+`/archives/${archive}`,'DELETE')).status,404);
+ const removed=await h.request(root+`/sessions/${session}`,'DELETE');assert.equal(removed.status,200);assert.equal(removed.body.historyKept,true);assert.equal(removed.body.removed,false);
  assert.equal((await h.store.query('SELECT * FROM messages')).length,1);
+ assert.equal((await h.store.query('SELECT * FROM wa_sessions'))[0].delete_requested,false);
+ // Deleting the licence: first a disconnect request (the number is still connected)…
+ const pendingDelete=await h.request(`/v1/installations/${i.installationId}`,'DELETE');assert.equal(pendingDelete.status,200);assert.equal(pendingDelete.body.removed,false);
  assert.equal((await h.store.query('SELECT * FROM wa_sessions'))[0].delete_requested,true);
- // Owning runner acknowledges authentication cleanup before the purge may complete.
+ assert.equal((await h.store.query('SELECT * FROM messages')).length,1);
+ // …then, once the owning runner closed it, history goes with the licence.
  await h.store.query("UPDATE wa_sessions SET closed_at=now(),state='disconnected' WHERE id=$1",[session]);
- assert.equal((await h.request(root+`/archives/${archive}`,'DELETE')).body.removed,true);
- for(const table of ['messages','wa_sessions','wa_archives','outbox','events','deliveries'])assert.equal((await h.store.query(`SELECT * FROM ${table}`)).length,0,table);
  await h.store.query("INSERT INTO audit(actor,action,target,created_at) VALUES('old','old.action','old',now()-interval '2 hours')");
  const recent=await h.request('/v1/audit');assert(!recent.body.some(r=>r.actor==='old'));
  const expanded=await h.request('/v1/audit?from='+encodeURIComponent(new Date(Date.now()-10800000).toISOString())+'&actor=old&action=old.action&target=old');assert.equal(expanded.body.length,1);
@@ -112,7 +115,8 @@ test('Admin CRUD, audit query e WhatsApp: revoche, isolamento e cancellazione di
  const next=await h.request('/v1/audit?limit=2&before='+paged.body[1].id);assert(next.body.every(r=>Number(r.id)<Number(paged.body[1].id)));
  assert.equal((await h.request('/v1/audit?from=invalid')).status,400);
  assert.equal((await h.request('/v1/audit?limit=201')).status,400);
- assert.equal((await h.request(`/v1/installations/${i.installationId}`,'DELETE')).status,200);
+ const deleted=await h.request(`/v1/installations/${i.installationId}`,'DELETE');assert.equal(deleted.status,200);assert.equal(deleted.body.removed,true);
+ for(const table of ['messages','wa_sessions','wa_archives','outbox','events','deliveries'])assert.equal((await h.store.query(`SELECT * FROM ${table}`)).length,0,table);
  assert.equal((await h.request(`/v1/installations/${other.id}`,'DELETE')).status,200);
  assert.equal((await h.request(`/v1/licenses/${c.id}/crud`,'DELETE')).status,200);
  assert.equal((await h.request('/v1/applications/crud','DELETE')).status,200);

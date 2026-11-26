@@ -2,6 +2,7 @@ import {AutomationService} from '../../api/src/automation.service.js';
 import {IdentitiesService} from '../../api/src/identities.service.js';
 import {recordMessage} from './message-record.js';
 import {runOutbox,recoverInterruptedOutbox,reconcileOutbox} from './outbox.js';
+import {syncHistory} from './history-sync.js';
 import {runProviderOperation} from './provider-operation.js';
 import 'reflect-metadata';
 import {WhatsAppBotService} from '../../api/src/whatsapp-bot.service.js';
@@ -67,14 +68,9 @@ async function start(id:string){
      }
    })().catch(()=>console.error('Aggiornamento stato fallito',id));});
    await event(session,'connection.connected',{number,archiveId:session.archive_id});
-   let count=0;
-   try {for(const chat of await client.getAllChats()) {
-     if(!clients.has(id)||stopping)break;
-     for(const m of await client.getAllMessagesInChat(String(chat.id),true,false)){await record(session,m,false);count++;}
-     await db.query('UPDATE wa_sessions SET sync_count=$2 WHERE id=$1',[id,count]);
-   }
-   await db.query("UPDATE wa_sessions SET sync_status='available_history_synced',sync_count=$2 WHERE id=$1",[id,count]);
-   }catch{await db.query("UPDATE wa_sessions SET sync_status='partial',sync_count=$2 WHERE id=$1",[id,count]);}
+   // First link of this number on this licence: full history. Same number again: only what is new.
+   const synced=await syncHistory(db,session,client,m=>record(session,m,false),()=>clients.has(id)&&!stopping);
+   console.log(JSON.stringify({component:'history',level:'info',message:'history_sync',sessionId:id,mode:synced.mode,count:synced.count,complete:synced.complete}));
  }catch(error:any){
    console.error('Connessione fallita',id,error.code||error.message);
    if(client){if(error.code==='23505')await client.logout(false).catch(()=>undefined);await client.kill().catch(()=>undefined);}

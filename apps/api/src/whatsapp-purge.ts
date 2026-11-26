@@ -10,3 +10,16 @@ export async function purgeWhatsApp(tx:PoolClient,installationId:string,archiveI
  if(archiveId)await tx.query('DELETE FROM wa_archives WHERE id=$1 AND installation_id=$2',[archiveId,installationId]);
  return true;
 }
+
+/**
+ * Deleting a licence: every WhatsApp connection of it is asked to disconnect and,
+ * once closed by its runner, removed with its archives (messages, outbox, events).
+ * false: a number is still connected; the request stays and the runner completes it.
+ */
+export async function purgeInstallationWhatsApp(tx:PoolClient,installationId:string){
+ await tx.query("UPDATE wa_sessions SET delete_requested=true,state=CASE WHEN closed_at IS NULL THEN 'disconnecting' ELSE state END,qr=null WHERE installation_id=$1",[installationId]);
+ for(const a of (await tx.query('SELECT id FROM wa_archives WHERE installation_id=$1',[installationId])).rows)await purgeWhatsApp(tx,installationId,a.id);
+ for(const s of (await tx.query('SELECT id FROM wa_sessions WHERE installation_id=$1 AND archive_id IS NULL',[installationId])).rows)await purgeWhatsApp(tx,installationId,null,s.id);
+ const left=(await tx.query('SELECT (SELECT count(*) FROM wa_sessions WHERE installation_id=$1)+(SELECT count(*) FROM wa_archives WHERE installation_id=$1) AS n',[installationId])).rows[0];
+ return Number(left?.n??0)===0;
+}

@@ -3,8 +3,9 @@ import type {IVRInput,IVRChannel,VoiceIVRSession} from './bot.js';
 import {subscribeWhatsApp} from './realtime.js';
 import type {RealtimeConfig,WhatsAppSubscribeOptions} from './realtime.js';
 import type {WhatsAppBotDefinition,WhatsAppBotState,WhatsAppBot,WhatsAppBotTurn} from './bot.js';
-export interface WhatsAppSession {id:string;created_at:string;number:string|null;state:string;archive_id:string|null;runner_id:string;runner_online:boolean;closed_at:string|null;delete_requested:boolean;sync_count:number;sync_status:string;sync_limit:string}
-export interface WhatsAppArchive {id:string;number:string;installation_id:string}
+/** sync_mode: full on the first link of a number on the licence, update when the same number is linked again. */
+export interface WhatsAppSession {id:string;created_at:string;number:string|null;state:string;archive_id:string|null;runner_id:string;runner_online:boolean;closed_at:string|null;delete_requested:boolean;sync_count:number;sync_status:string;sync_limit:string;sync_mode?:'full'|'update'|null}
+export interface WhatsAppArchive {id:string;number:string;installation_id:string;history_synced_at?:string|null}
 export interface Conversation {chat_id:string;messages:number;last_message_at:string;preview:string;kind:string;direction:string;contact:ConversationContact|null}
 export interface WhatsAppMessage {id:string;chat_id:string;direction:string;kind:string;occurred_at:string;body:{text?:string;media?:string;mediaAvailable?:boolean;filename?:string;mimetype?:string;selectedButtonId?:string;interactive?:InteractiveContent;senderName?:string;quotedText?:string}}
 export type WhatsAppPayload={kind:'interactive';to:string;content:InteractiveContent}|{kind:'text';to:string;text:string}|{kind:'image'|'document'|'audio'|'video';to:string;data:string;filename:string;caption?:string}|{kind:'poll';to:string;question:string;options:string[]};
@@ -53,8 +54,8 @@ export function whatsappClient(request:Request,installationId:string,realtime:Re
   cancelMessage:(outboxId:string)=>request<OutboxItem>(root+'/outbox/'+encodeURIComponent(outboxId)+'/cancel','POST',{}),
   sendText:(id:string,to:string,text:string,idempotencyKey=crypto.randomUUID())=>request<{id:string;state:string}>(session(id)+'/messages','POST',{kind:'text',to,text},{'Idempotency-Key':idempotencyKey}),
   reconnect:(id:string)=>request(session(id)+'/reconnect','POST'),disconnect:(id:string)=>request(session(id)+'/disconnect','POST'),
-  deleteConnection:(id:string)=>request<{removed:boolean;state:string}>(session(id),'DELETE'),
-  deleteArchive:(id:string)=>request<{removed:boolean;state:string}>(archive(id),'DELETE'),
+  /** Closes a connection. History is never deleted: it stays per licence and number (it goes only with the licence). */
+  deleteConnection:(id:string)=>request<{removed:boolean;state:string;historyKept:true}>(session(id),'DELETE'),
   archives:()=>request<WhatsAppArchive[]>(root+'/archives'),
   messages:(id:string,before?:string,chat?:string)=>request<WhatsAppMessage[]>(archive(id)+`/messages?${new URLSearchParams({...before?{before}:{},...chat?{chat}:{}})}`),
   conversations:(id:string)=>request<Conversation[]>(archive(id)+'/conversations'),

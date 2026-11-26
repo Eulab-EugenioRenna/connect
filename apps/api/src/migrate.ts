@@ -76,6 +76,10 @@ try {
       await db.query(await readFile('infra/postgres/017-outbox-verified-retry.sql','utf8'));
       await db.query("INSERT INTO schema_migrations(version) VALUES('017')");
     }
+    if (!(await db.query("SELECT 1 FROM schema_migrations WHERE version='018'")).rowCount) {
+      await db.query(await readFile('infra/postgres/018-whatsapp-history-per-number.sql','utf8'));
+      await db.query("INSERT INTO schema_migrations(version) VALUES('018')");
+    }
   });
-  console.log('Migrazioni 001–017 verificate');
+  console.log('Migrazioni 001–018 verificate');
 } finally { await database.onModuleDestroy(); }
