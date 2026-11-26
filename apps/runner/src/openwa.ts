@@ -1,5 +1,6 @@
 import type {InteractiveContent,InteractiveResponse,ProviderCommand,ConversationContact} from '../../../packages/sdk/src/interactive.js';
 import {mkdir,rm} from 'node:fs/promises';
+import {createDecipheriv,createHmac,hkdfSync,timingSafeEqual} from 'node:crypto';
 import path from 'node:path';
 import {required} from '../../api/src/config.js';
 import {readChatIds} from './openwa-history.js';
@@ -23,6 +24,37 @@ export function providerReason(error:unknown){
 }
 
 const MEDIA_HOST='https://mmg.whatsapp.net';
+const MEDIA_INFO:Record<string,string>={image:'Image',sticker:'Image',video:'Video',gif:'Video',audio:'Audio',ptt:'Audio',document:'Document'};
+/**
+ * WhatsApp media: AES-256-CBC with keys from HKDF(mediaKey), and a 10-byte MAC after the
+ * ciphertext. The MAC is checked, then removed before decrypting (the bundled decrypter
+ * kept it and failed with ERR_OSSL_WRONG_FINAL_BLOCK_LENGTH).
+ */
+export function decryptMediaBytes(encrypted:Buffer,mediaKeyBase64:string,type:string,mimetype?:string){
+ const kind=MEDIA_INFO[type]??(mimetype?.startsWith('image/')?'Image':mimetype?.startsWith('video/')?'Video':mimetype?.startsWith('audio/')?'Audio':'Document');
+ const keys=Buffer.from(hkdfSync('sha256',Buffer.from(mediaKeyBase64,'base64'),Buffer.alloc(32),`WhatsApp ${kind} Keys`,112));
+ const iv=keys.subarray(0,16),cipherKey=keys.subarray(16,48),macKey=keys.subarray(48,80);
+ if(encrypted.length<=10)throw new Error('MEDIA_TOO_SHORT');
+ const body=encrypted.subarray(0,-10),mac=encrypted.subarray(-10);
+ const expected=createHmac('sha256',macKey).update(iv).update(body).digest().subarray(0,10);
+ if(!timingSafeEqual(mac,expected))throw new Error('MEDIA_MAC_MISMATCH');
+ const decipher=createDecipheriv('aes-256-cbc',cipherKey,iv);
+ return Buffer.concat([decipher.update(body),decipher.final()]);
+}
+/** Downloads and decrypts one attachment; the result is a data URL. */
+export async function decryptWhatsAppMedia(m:any):Promise<string>{
+ const url=String(m.deprecatedMms3Url||m.clientUrl||'').trim();
+ if(!url.startsWith('https://')||!m.mediaKey||!m.mimetype)throw new Error('MEDIA_FIELDS_MISSING');
+ let response:Response|undefined;
+ for(let attempt=0;attempt<3;attempt++){
+  response=await fetch(url,{headers:{'User-Agent':'WhatsApp/2.2412.54 Mozilla/5.0',Origin:'https://web.whatsapp.com',Referer:'https://web.whatsapp.com/'},signal:AbortSignal.timeout(30_000)});
+  if(response.ok||[403,404,410].includes(response.status))break;
+  await new Promise(r=>setTimeout(r,1500));
+ }
+ if(!response?.ok)throw new Error(`MEDIA_DOWNLOAD_HTTP_${response?.status??0}`);
+ const data=decryptMediaBytes(Buffer.from(await response.arrayBuffer()),String(m.mediaKey),String(m.type||''),String(m.mimetype));
+ return `data:${String(m.mimetype).split(';')[0]};base64,${data.toString('base64')}`;
+}
 /**
  * Fields the decrypter needs. Recent WhatsApp Web gives only «directPath» (no clientUrl /
  * deprecatedMms3Url): the download URL is rebuilt from it. Without keys the message is read
@@ -38,14 +70,29 @@ export async function mediaSource(message:any,byId:(id:string)=>Promise<any>){
  if(!m.deprecatedMms3Url&&!m.clientUrl&&typeof m.directPath==='string'&&m.directPath.startsWith('/'))m.deprecatedMms3Url=MEDIA_HOST+m.directPath;
  return m;
 }
-/** Runs in WhatsApp Web: the chat model must exist before a photo or file can go to it. */
-export async function openChatInPage(to:string):Promise<'exists'|'opened'|'missing'|'unsupported'>{
- const chats=(globalThis as any).Store?.Chat;
- if(!chats||typeof chats.get!=='function')return 'unsupported';
- if(chats.get(to))return 'exists';
- if(typeof chats.find!=='function')return 'unsupported';
- try{await chats.find(to);}catch{return 'missing';}
- return chats.get(to)?'opened':'missing';
+/**
+ * Runs in WhatsApp Web: the chat model must exist before a photo or file can go to it.
+ * Tries the current WhatsApp module (findOrCreateLatestChat, which may answer with a
+ * private «@lid» chat) and then the older Store.Chat.find.
+ */
+export async function openChatInPage(to:string):Promise<{state:'exists'|'opened'|'missing'|'unsupported';chatId:string|null;via:string}>{
+ const root=globalThis as any,chats=root.Store?.Chat;
+ const idOf=(chat:any)=>typeof chat?.id==='string'?chat.id:typeof chat?.id?._serialized==='string'?chat.id._serialized:null;
+ if(chats&&typeof chats.get==='function'){const found=chats.get(to);if(found)return {state:'exists',chatId:idOf(found)??to,via:'store'};}
+ const need=typeof root.require==='function'?(name:string)=>{try{return root.require(name);}catch{return null;}}:()=>null;
+ const widFactory=need('WAWebWidFactory'),finder=need('WAWebFindChatAction');
+ if(widFactory?.createWid&&finder?.findOrCreateLatestChat){
+  try{
+   const result=await finder.findOrCreateLatestChat(widFactory.createWid(to));
+   const chatId=idOf(result?.chat??result);
+   if(chatId)return {state:'opened',chatId,via:'findOrCreateLatestChat'};
+  }catch{ /* older WhatsApp Web: try the Store below */ }
+ }
+ if(chats&&typeof chats.find==='function'){
+  try{const chat=await chats.find(to);const chatId=idOf(chat)??idOf(chats.get(to));if(chatId)return {state:'opened',chatId,via:'store.find'};}catch{ /* below */ }
+  return {state:'missing',chatId:null,via:'store.find'};
+ }
+ return {state:chats?'missing':'unsupported',chatId:null,via:'none'};
 }
 interface Outgoing {id:string;type:string;body:string;caption:string;to:string;ack:number|undefined}
 const serialized=(value:any):string=>typeof value==='string'?value:typeof value?._serialized==='string'?value._serialized:'';
@@ -123,8 +170,8 @@ export interface WaClient {
  checkNumber?(to:string):Promise<number|null>;
  /** Current acknowledgement of a sent message: -1 error, 0 waiting, 1 server, 2 delivered, 3 read; null not found. */
  messageAck?(id:string):Promise<number|null>;
- /** Opens the chat in WhatsApp Web without writing in it: media can be sent only to an open chat. */
- openChat?(to:string):Promise<'exists'|'opened'|'missing'|'unsupported'>;
+ /** Opens the chat in WhatsApp Web without writing in it: media can be sent only to an open chat. chatId: where to send (it may be a private «@lid» id). */
+ openChat?(to:string):Promise<{state:'exists'|'opened'|'missing'|'unsupported';chatId:string|null;via:string}>;
 }
 // Only this adapter depends on OpenWAUnlocked's lifecycle and method names.
 export class OpenWaAdapter {
@@ -187,7 +234,7 @@ export class OpenWaAdapter {
    getAllMessagesInChat:(id,includeMe,notifications)=>raw.getAllMessages(id,includeMe,notifications),
    onAnyMessage:async fn=>{messageListeners.add(fn);},onStateChanged:async fn=>raw.onStateChanged(fn),onAck:async fn=>{ackListeners.add(fn);},
    sendText:(to,text)=>raw.sendText(to,text),sendFile:(to,data,name,caption)=>raw.sendFile(to,data,name,{caption}),
-   sendPoll:(to,question,options)=>raw.sendPoll(to,question,options),decryptMedia:async message=>raw.decryptMedia(await mediaSource(message,id=>raw.getMessageById(id))),
+   sendPoll:(to,question,options)=>raw.sendPoll(to,question,options),decryptMedia:async message=>decryptWhatsAppMedia(await mediaSource(message,id=>raw.getMessageById(id))),
    checkNumber:async to=>{const r=await raw.checkNumberStatus(to);return r?.status===404?404:r?.numberExists===true||r?.status===200?200:null;},
    messageAck:async id=>{const m=await raw.getMessageById(id);return m&&typeof m.ack==='number'?m.ack:null;},
    openChat:to=>raw.evaluate(openChatInPage,to),
@@ -241,8 +288,10 @@ export class OpenWaAdapter {
   }
   // «Start a chat with sendText … before trying to send media»: open the chat first, no extra message.
   if(mediaTypes[p.kind]&&client.openChat){
-   const opened=await client.openChat(String(p.to)).catch(()=>'missing' as const);
-   if(opened!=='exists')console.warn(JSON.stringify({component:'outbox',level:'info',message:'media_chat_opened',result:opened}));
+   const opened=await client.openChat(String(p.to)).catch(()=>({state:'missing' as const,chatId:null,via:'error'}));
+   if(opened.state!=='exists')console.warn(JSON.stringify({component:'outbox',level:'info',message:'media_chat_opened',result:opened.state,via:opened.via,lid:!!opened.chatId?.endsWith('@lid')}));
+   // The chat may live under its private «@lid» id: the media goes there.
+   if(opened.chatId&&opened.chatId!==p.to)p={...p,to:opened.chatId};
   }
   const watch=tracker.watch(p),limits=OpenWaAdapter.verify;
   try{

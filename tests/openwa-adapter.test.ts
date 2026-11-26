@@ -4,7 +4,7 @@ import {EventEmitter} from 'node:events';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {OpenWaAdapter,NotSent,Unconfirmed,NotOnWhatsApp,providerReason,openChatInPage,mediaSource} from '../apps/runner/src/openwa.js';
+import {OpenWaAdapter,NotSent,Unconfirmed,NotOnWhatsApp,providerReason,openChatInPage,mediaSource,decryptMediaBytes} from '../apps/runner/src/openwa.js';
 OpenWaAdapter.verify={afterResultMs:60,afterErrorMs:40,ackMs:60};
 
 const sessionId='00000000-0000-0000-0000-000000000001';
@@ -169,10 +169,10 @@ test('Foto a chi non ha ancora una chat: la chat viene aperta prima, senza messa
   assert.deepEqual(calls.filter(c=>c[0]!=='check').map(c=>c[0]),['find','file']);
   await adapter.send(client,{kind:'text',to:'393331234567@c.us',text:'Ciao'});
   assert.equal(calls.filter(c=>c[0]==='find').length,1,'text needs no chat, an open chat is not opened again');
-  assert.equal(await openChatInPage('393331234567@c.us'),'exists');
+  assert.equal((await openChatInPage('393331234567@c.us')).state,'exists');
   root.Store={Chat:{get:()=>undefined,find:async()=>{throw new Error('no');}}};
-  assert.equal(await openChatInPage('x@c.us'),'missing');
-  delete root.Store;assert.equal(await openChatInPage('x@c.us'),'unsupported');
+  assert.equal((await openChatInPage('x@c.us')).state,'missing');
+  delete root.Store;assert.equal((await openChatInPage('x@c.us')).state,'unsupported');
  }finally{if(previous===undefined)delete root.Store;else root.Store=previous;}
 }));
 
@@ -184,4 +184,28 @@ test('Allegati: URL ricostruito da directPath, chiavi rilette dal telefono se ma
  assert.equal(fromPhone.mediaKey,'k');assert.equal(fromPhone.deprecatedMms3Url,'https://mmg.whatsapp.net/v/t62/abc?ccb=1');
  // An explicit URL is kept.
  assert.equal((await mediaSource({...full,clientUrl:'https://mmg.whatsapp.net/x'},async()=>null)).deprecatedMms3Url,undefined);
+});
+
+test('Foto: la chat aperta da WhatsApp con ID privato (@lid) riceve la foto',async()=>fixture(async({adapter,calls})=>{
+ const root=globalThis as any,previous={store:root.Store,require:root.require};
+ root.Store={Chat:{get:()=>undefined}};
+ root.require=(name:string)=>name==='WAWebWidFactory'?{createWid:(id:string)=>({_serialized:id})}:name==='WAWebFindChatAction'?{findOrCreateLatestChat:async()=>({chat:{id:{_serialized:'27682913@lid'}}})}:null;
+ try{
+  const client=await adapter.create(sessionId,async()=>{});
+  await adapter.send(client,{kind:'image',to:'393331234567@c.us',data:'data:image/png;base64,AA==',filename:'p.png'});
+  assert.equal(calls.find(c=>c[0]==='file')[1],'27682913@lid');
+ }finally{root.Store=previous.store;root.require=previous.require;if(previous.store===undefined)delete root.Store;if(previous.require===undefined)delete root.require;}
+}));
+
+test('Allegati: decifratura WhatsApp con verifica e rimozione della firma (MAC)',async()=>{
+ const {hkdfSync,createCipheriv,createHmac,randomBytes}=await import('node:crypto');
+ const mediaKey=randomBytes(32),plain=Buffer.from('foto di prova '.repeat(7));
+ const keys=Buffer.from(hkdfSync('sha256',mediaKey,Buffer.alloc(32),'WhatsApp Image Keys',112));
+ const iv=keys.subarray(0,16),cipher=createCipheriv('aes-256-cbc',keys.subarray(16,48),iv);
+ const body=Buffer.concat([cipher.update(plain),cipher.final()]);
+ const mac=createHmac('sha256',keys.subarray(48,80)).update(iv).update(body).digest().subarray(0,10);
+ const file=Buffer.concat([body,mac]);
+ assert.deepEqual(decryptMediaBytes(file,mediaKey.toString('base64'),'image','image/jpeg'),plain);
+ const tampered=Buffer.from(file);tampered[3]^=1;
+ assert.throws(()=>decryptMediaBytes(tampered,mediaKey.toString('base64'),'image'),/MEDIA_MAC_MISMATCH/);
 });
