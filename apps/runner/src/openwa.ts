@@ -22,6 +22,31 @@ export function providerReason(error:unknown){
  return clean||'PROVIDER_ERROR';
 }
 
+const MEDIA_HOST='https://mmg.whatsapp.net';
+/**
+ * Fields the decrypter needs. Recent WhatsApp Web gives only «directPath» (no clientUrl /
+ * deprecatedMms3Url): the download URL is rebuilt from it. Without keys the message is read
+ * again from the phone by its ID.
+ */
+export async function mediaSource(message:any,byId:(id:string)=>Promise<any>){
+ let m={...message};
+ const id=typeof m.id==='string'?m.id:m.id?._serialized;
+ if((!m.mediaKey||!m.filehash||!(m.deprecatedMms3Url||m.clientUrl||m.directPath))&&id){
+  const fresh=await byId(id).catch(()=>null);
+  if(fresh&&typeof fresh==='object')m={...fresh,...Object.fromEntries(Object.entries(m).filter(([,v])=>v!=null&&v!==''))};
+ }
+ if(!m.deprecatedMms3Url&&!m.clientUrl&&typeof m.directPath==='string'&&m.directPath.startsWith('/'))m.deprecatedMms3Url=MEDIA_HOST+m.directPath;
+ return m;
+}
+/** Runs in WhatsApp Web: the chat model must exist before a photo or file can go to it. */
+export async function openChatInPage(to:string):Promise<'exists'|'opened'|'missing'|'unsupported'>{
+ const chats=(globalThis as any).Store?.Chat;
+ if(!chats||typeof chats.get!=='function')return 'unsupported';
+ if(chats.get(to))return 'exists';
+ if(typeof chats.find!=='function')return 'unsupported';
+ try{await chats.find(to);}catch{return 'missing';}
+ return chats.get(to)?'opened':'missing';
+}
 interface Outgoing {id:string;type:string;body:string;caption:string;to:string;ack:number|undefined}
 const serialized=(value:any):string=>typeof value==='string'?value:typeof value?._serialized==='string'?value._serialized:'';
 function outgoing(m:any):Outgoing|undefined{
@@ -98,6 +123,8 @@ export interface WaClient {
  checkNumber?(to:string):Promise<number|null>;
  /** Current acknowledgement of a sent message: -1 error, 0 waiting, 1 server, 2 delivered, 3 read; null not found. */
  messageAck?(id:string):Promise<number|null>;
+ /** Opens the chat in WhatsApp Web without writing in it: media can be sent only to an open chat. */
+ openChat?(to:string):Promise<'exists'|'opened'|'missing'|'unsupported'>;
 }
 // Only this adapter depends on OpenWAUnlocked's lifecycle and method names.
 export class OpenWaAdapter {
@@ -160,9 +187,10 @@ export class OpenWaAdapter {
    getAllMessagesInChat:(id,includeMe,notifications)=>raw.getAllMessages(id,includeMe,notifications),
    onAnyMessage:async fn=>{messageListeners.add(fn);},onStateChanged:async fn=>raw.onStateChanged(fn),onAck:async fn=>{ackListeners.add(fn);},
    sendText:(to,text)=>raw.sendText(to,text),sendFile:(to,data,name,caption)=>raw.sendFile(to,data,name,{caption}),
-   sendPoll:(to,question,options)=>raw.sendPoll(to,question,options),decryptMedia:message=>raw.decryptMedia(message),
+   sendPoll:(to,question,options)=>raw.sendPoll(to,question,options),decryptMedia:async message=>raw.decryptMedia(await mediaSource(message,id=>raw.getMessageById(id))),
    checkNumber:async to=>{const r=await raw.checkNumberStatus(to);return r?.status===404?404:r?.numberExists===true||r?.status===200?200:null;},
    messageAck:async id=>{const m=await raw.getMessageById(id);return m&&typeof m.ack==='number'?m.ack:null;},
+   openChat:to=>raw.evaluate(openChatInPage,to),
    // Logout uses the public evaluate API. Failure remains unconfirmed in audit.
    logout:async()=>await raw.evaluate(()=>{const api=(globalThis as any).WAPI;if(typeof api?.logout!=='function')throw new Error('LOGOUT_NOT_SUPPORTED');return api.logout();},undefined)===true,
    kill:()=>raw.stop('eulab-stop')
@@ -210,6 +238,11 @@ export class OpenWaAdapter {
   if(String(p.to).endsWith('@c.us')&&client.checkNumber){
    const status=await this.numberStatus(client,String(p.to));
    if(status===404)throw new NotOnWhatsApp('NOT_ON_WHATSAPP');
+  }
+  // «Start a chat with sendText … before trying to send media»: open the chat first, no extra message.
+  if(mediaTypes[p.kind]&&client.openChat){
+   const opened=await client.openChat(String(p.to)).catch(()=>'missing' as const);
+   if(opened!=='exists')console.warn(JSON.stringify({component:'outbox',level:'info',message:'media_chat_opened',result:opened}));
   }
   const watch=tracker.watch(p),limits=OpenWaAdapter.verify;
   try{

@@ -4,7 +4,7 @@ import {EventEmitter} from 'node:events';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {OpenWaAdapter,NotSent,Unconfirmed,NotOnWhatsApp,providerReason} from '../apps/runner/src/openwa.js';
+import {OpenWaAdapter,NotSent,Unconfirmed,NotOnWhatsApp,providerReason,openChatInPage,mediaSource} from '../apps/runner/src/openwa.js';
 OpenWaAdapter.verify={afterResultMs:60,afterErrorMs:40,ackMs:60};
 
 const sessionId='00000000-0000-0000-0000-000000000001';
@@ -159,3 +159,29 @@ test('Numero senza WhatsApp: nessun tentativo; il controllo è ricordato per il 
  assert.equal(calls.filter(c=>c[0]==='check').length,1);assert.equal(calls.filter(c=>c[0]==='text').length,0);
  assert.equal(await adapter.ackOf(client,'true_x'),2);
 }));
+
+test('Foto a chi non ha ancora una chat: la chat viene aperta prima, senza messaggi in più',async()=>fixture(async({adapter,calls})=>{
+ const root=globalThis as any,previous=root.Store,open=new Set<string>();
+ root.Store={Chat:{get:(id:string)=>open.has(id)?{id}:undefined,find:async(id:string)=>{calls.push(['find',id]);open.add(id);}}};
+ try{
+  const client=await adapter.create(sessionId,async()=>{});
+  await adapter.send(client,{kind:'image',to:'393331234567@c.us',data:'data:image/png;base64,AA==',filename:'p.png'});
+  assert.deepEqual(calls.filter(c=>c[0]!=='check').map(c=>c[0]),['find','file']);
+  await adapter.send(client,{kind:'text',to:'393331234567@c.us',text:'Ciao'});
+  assert.equal(calls.filter(c=>c[0]==='find').length,1,'text needs no chat, an open chat is not opened again');
+  assert.equal(await openChatInPage('393331234567@c.us'),'exists');
+  root.Store={Chat:{get:()=>undefined,find:async()=>{throw new Error('no');}}};
+  assert.equal(await openChatInPage('x@c.us'),'missing');
+  delete root.Store;assert.equal(await openChatInPage('x@c.us'),'unsupported');
+ }finally{if(previous===undefined)delete root.Store;else root.Store=previous;}
+}));
+
+test('Allegati: URL ricostruito da directPath, chiavi rilette dal telefono se mancano',async()=>{
+ const full={id:'false_1@c.us_A',type:'image',mimetype:'image/jpeg',mediaKey:'k',filehash:'h',size:10,directPath:'/v/t62/abc?ccb=1'};
+ assert.equal((await mediaSource(full,async()=>null)).deprecatedMms3Url,'https://mmg.whatsapp.net/v/t62/abc?ccb=1');
+ // A history record without keys: the phone's copy completes it, the record's own values win.
+ const fromPhone=await mediaSource({id:'false_1@c.us_A',type:'image',mimetype:'image/jpeg'},async id=>id==='false_1@c.us_A'?full:null);
+ assert.equal(fromPhone.mediaKey,'k');assert.equal(fromPhone.deprecatedMms3Url,'https://mmg.whatsapp.net/v/t62/abc?ccb=1');
+ // An explicit URL is kept.
+ assert.equal((await mediaSource({...full,clientUrl:'https://mmg.whatsapp.net/x'},async()=>null)).deprecatedMms3Url,undefined);
+});

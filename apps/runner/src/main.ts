@@ -3,6 +3,7 @@ import {IdentitiesService} from '../../api/src/identities.service.js';
 import {recordMessage} from './message-record.js';
 import {runOutbox,recoverInterruptedOutbox,reconcileOutbox} from './outbox.js';
 import {syncHistory} from './history-sync.js';
+import {providerReason} from './openwa.js';
 import {runProviderOperation} from './provider-operation.js';
 import 'reflect-metadata';
 import {WhatsAppBotService} from '../../api/src/whatsapp-bot.service.js';
@@ -32,7 +33,10 @@ async function record(session:any,m:any,emit:boolean){
  if(!m.id||!session.archive_id)return;
  if(['buttons_response','list_response','native_flow_response','interactive'].includes(m.type))return;
  let media:string|undefined;
- if(m.mimetype&&clients.has(session.id)){try{media=await clients.get(session.id)!.decryptMedia(m);if(media.length>14_000_000)media=undefined;}catch{ /* WhatsApp may no longer make media available. */ }}
+ if(m.mimetype&&clients.has(session.id)){try{media=await clients.get(session.id)!.decryptMedia(m);if(media.length>14_000_000)media=undefined;}catch(error){
+   // WhatsApp may no longer make media available: the reason is logged (no numbers, IDs or links).
+   console.warn(JSON.stringify({component:'media',level:'warn',message:'media_unavailable',kind:String(m.type||''),live:emit,reason:providerReason(error)}));
+ }}
  await recordMessage(db,bots,session,m,emit,media);
 }
 async function start(id:string){
