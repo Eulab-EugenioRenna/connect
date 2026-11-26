@@ -77,6 +77,12 @@ export class WhatsAppController {
    return this.wa.enqueue(i,id,payload,idem,req.principal);
  }
  @Get('outbox') async outbox(@Param('installationId') i:string,@Req() req:RequestContext){await this.access(req,i,'whatsapp.read');return this.db.query('SELECT id,session_id,state,provider_id,error,attempts,created_at FROM outbox WHERE installation_id=$1 ORDER BY created_at DESC LIMIT 200',[i]);}
+ /** One message, also when it is no longer among the latest 200 (a long «send to all»). */
+ @Get('outbox/:id') async outboxItem(@Param('installationId') i:string,@Param('id') id:string,@Req() req:RequestContext){
+   await this.access(req,i,'whatsapp.read');parse(uuid,id);
+   const [row]=await this.db.query('SELECT id,session_id,state,provider_id,error,attempts,created_at FROM outbox WHERE id=$1 AND installation_id=$2',[id,i]);
+   if(!row)throw new NotFoundException();return row;
+ }
  /** Withdraws one message that has not left yet (waiting or between attempts). A message being sent is not interrupted. */
  @Post('outbox/:id/cancel') async cancelOutbox(@Param('installationId') i:string,@Param('id') id:string,@Req() req:RequestContext){
    await this.access(req,i,'whatsapp.send');parse(uuid,id);

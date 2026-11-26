@@ -53,5 +53,9 @@ test('Outbox: annulla il singolo messaggio in attesa (anche tra un tentativo e l
   const sent=ok(await h.send(h.message,'cancel-single-002'));
   await runOutbox(h.store,sent.id,'synthetic-runner',async()=>async()=>'true_x@c.us_ok');
   assert.equal((await cancel(sent.id)).body.state,'sent');
+  const item=await h.request(`/v1/installations/${h.installation}/whatsapp/outbox/${id}`,'GET',undefined,h.personal);
+  // Reading needs whatsapp.read, which this author does not have.
+  assert.equal(item.status,403);
+  assert.equal((await row(h,id)).error,'cancelled_by_user');
  }finally{await h.close();}
 });

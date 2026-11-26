@@ -47,6 +47,8 @@ export function whatsappClient(request:Request,installationId:string,realtime:Re
   send:(id:string,payload:WhatsAppPayload,idempotencyKey=crypto.randomUUID())=>request<{id:string;state:string}>(session(id)+'/messages','POST',payload,{'Idempotency-Key':idempotencyKey}),
   test:(id:string,payload:WhatsAppPayload)=>request<{valid:boolean;kind:string;to:string;connected:boolean;sent:false}>(session(id)+'/messages/test','POST',payload),
   outbox:()=>request<OutboxItem[]>(root+'/outbox'),
+  /** One message by its outbox ID, with state, attempts and error. */
+  outboxItem:(outboxId:string)=>request<OutboxItem>(root+'/outbox/'+encodeURIComponent(outboxId)),
   /** Withdraws a message not yet left (waiting or between attempts); returns its state afterwards. */
   cancelMessage:(outboxId:string)=>request<OutboxItem>(root+'/outbox/'+encodeURIComponent(outboxId)+'/cancel','POST',{}),
   sendText:(id:string,to:string,text:string,idempotencyKey=crypto.randomUUID())=>request<{id:string;state:string}>(session(id)+'/messages','POST',{kind:'text',to,text},{'Idempotency-Key':idempotencyKey}),
