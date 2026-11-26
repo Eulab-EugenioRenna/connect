@@ -76,7 +76,16 @@ export class WhatsAppController {
    await this.access(req,i,'whatsapp.send');parse(uuid,id);const payload=parse(messageSchema,body);parse(z.string().min(8).max(128).regex(/^[a-zA-Z0-9_-]+$/),idem);
    return this.wa.enqueue(i,id,payload,idem,req.principal);
  }
- @Get('outbox') async outbox(@Param('installationId') i:string,@Req() req:RequestContext){await this.access(req,i,'whatsapp.read');return this.db.query('SELECT id,session_id,state,provider_id,error,created_at FROM outbox WHERE installation_id=$1 ORDER BY created_at DESC LIMIT 200',[i]);}
+ @Get('outbox') async outbox(@Param('installationId') i:string,@Req() req:RequestContext){await this.access(req,i,'whatsapp.read');return this.db.query('SELECT id,session_id,state,provider_id,error,attempts,created_at FROM outbox WHERE installation_id=$1 ORDER BY created_at DESC LIMIT 200',[i]);}
+ /** Withdraws one message that has not left yet (waiting or between attempts). A message being sent is not interrupted. */
+ @Post('outbox/:id/cancel') async cancelOutbox(@Param('installationId') i:string,@Param('id') id:string,@Req() req:RequestContext){
+   await this.access(req,i,'whatsapp.send');parse(uuid,id);
+   return this.db.transaction(async db=>{
+    const current=(await db.query('SELECT id,state FROM outbox WHERE id=$1 AND installation_id=$2 FOR UPDATE',[id,i])).rows[0];if(!current)throw new NotFoundException();
+    if(current.state==='queued'){await db.query("UPDATE outbox SET state='cancelled',error='cancelled_by_user' WHERE id=$1",[id]);await audit(db,req.principal.subject!,'whatsapp.outbox.cancel',id);}
+    return (await db.query('SELECT id,session_id,state,provider_id,error,attempts,created_at FROM outbox WHERE id=$1',[id])).rows[0];
+   });
+ }
  @Post('webhooks') @ApiInput(whatsappWebhookSchema) async webhook(@Param('installationId') i:string,@Body() body:unknown,@Req() req:RequestContext) {
    await this.access(req,i,'whatsapp.manage');const b=parse(whatsappWebhookSchema,body);
    const url=new URL(b.url);if(url.protocol!=='https:'||url.username||url.password||url.port&&url.port!=='443')throw new ForbiddenException('Webhook HTTPS sulla porta 443 richiesto');

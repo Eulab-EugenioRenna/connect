@@ -43,6 +43,8 @@ export async function harness(settings={}){
  await pg.exec(await readFile('infra/postgres/014-delegated-accounts.sql','utf8'));
  if(settings.beforeAutomationMigration)await settings.beforeAutomationMigration(pg);
  await pg.exec(await readFile('infra/postgres/015-automation-delegations.sql','utf8'));
+ await pg.exec(await readFile('infra/postgres/016-whatsapp-link-code.sql','utf8'));
+ await pg.exec(await readFile('infra/postgres/017-outbox-verified-retry.sql','utf8'));
  const store={query:async(sql,params=[])=> (await pg.query(sql,params)).rows,transaction:async fn=>pg.transaction(async tx=>fn({query:async(sql,params=[])=>{const r=await tx.query(sql,params);return {...r,rowCount:r.rowCount??r.affectedRows??r.rows.length};}})),onModuleDestroy:async()=>{}};
  const {AppModule,configureApp}=await import('../dist/server/apps/api/src/app.js');const {Database}=await import('../dist/server/apps/api/src/database.js');
  let readCatalog=async()=>{throw new Error('Fonte di test non disponibile');};

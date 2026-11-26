@@ -5,6 +5,83 @@ import {required} from '../../api/src/config.js';
 import {readChatIds} from './openwa-history.js';
 /** The provider said no before sending anything: the message did not leave. */
 export class ProviderRejected extends Error {}
+/** Verified on the phone: no outgoing message appeared. Safe to try again. */
+export class NotSent extends Error {}
+/** The message exists on the phone but WhatsApp never confirmed it: never resent, checked again later by its ID. */
+export class Unconfirmed extends Error {constructor(message:string,readonly messageId?:string){super(message);}}
+/** WhatsApp says the number has no account: no attempt is made. */
+export class NotOnWhatsApp extends Error {}
+
+/** Provider text without numbers, chat IDs, URLs or long tokens: safe for logs and status. */
+export function providerReason(error:unknown){
+ const raw=error instanceof Error?error.message:typeof error==='string'?error:'';
+ const code=(error as {code?:unknown})?.code;
+ if(/^[A-Z_]{3,60}$/.test(raw))return raw;
+ if(typeof code==='string'&&/^[A-Z_]{3,60}$/.test(code))return code;
+ const clean=raw.replace(/https?:\/\/\S+/g,'[url]').replace(/[\w.+-]*@[\w.-]+/g,'[id]').replace(/[A-Za-z0-9+/=_-]{24,}/g,'[…]').replace(/\d{3,}/g,'#').replace(/\s+/g,' ').trim().slice(0,120);
+ return clean||'PROVIDER_ERROR';
+}
+
+interface Outgoing {id:string;type:string;body:string;caption:string;to:string;ack:number|undefined}
+const serialized=(value:any):string=>typeof value==='string'?value:typeof value?._serialized==='string'?value._serialized:'';
+function outgoing(m:any):Outgoing|undefined{
+ if(!m||!(m.fromMe===true||m.id?.fromMe===true))return;
+ const id=serialized(m.id);if(!id)return;
+ return {id,type:String(m.type||''),body:String(m.body??m.content??''),caption:String(m.caption??''),to:serialized(m.to)||serialized(m.chatId),ack:typeof m.ack==='number'?m.ack:undefined};
+}
+const mediaTypes:Record<string,string[]>={image:['image'],video:['video','gif'],document:['document'],audio:['audio','ptt']};
+/** Is this outgoing message the one we just asked for? Only one send per number runs at a time. */
+function sameMessage(p:any,m:Outgoing){
+ const to=String(p.to||'');
+ // A phone-number chat must be the same number; a privacy ID (@lid) cannot be compared.
+ if(m.to.endsWith('@c.us')&&to.endsWith('@c.us')&&m.to.replace(/\D/g,'')!==to.replace(/\D/g,''))return false;
+ if(m.to.endsWith('@g.us')&&m.to!==to)return false;
+ if(p.kind==='text')return m.type==='chat'&&m.body===String(p.text??'');
+ if(mediaTypes[p.kind])return mediaTypes[p.kind].includes(m.type)&&m.caption===String(p.caption??'');
+ if(p.kind==='poll')return m.type==='poll_creation';
+ return false;
+}
+/**
+ * Outgoing messages and acknowledgements seen on the phone. A send is verified against these,
+ * not against the return value of the browser function, which can fail after sending or succeed without sending.
+ */
+export class SendTracker {
+ private readonly acks=new Map<string,number>();
+ private readonly listeners=new Set<(m:Outgoing)=>void>();
+ private readonly ackListeners=new Set<(id:string,ack:number)=>void>();
+ message(raw:any){const m=outgoing(raw);if(!m)return;if(m.ack!==undefined)this.ack({id:m.id,ack:m.ack,fromMe:true});for(const fn of this.listeners)fn(m);}
+ ack(raw:any){
+  const id=serialized(raw?.id),ack=raw?.ack;if(!id||typeof ack!=='number')return;
+  const best=ack<0?ack:Math.max(ack,this.acks.get(id)??ack);this.acks.set(id,best);
+  if(this.acks.size>2000)this.acks.delete(this.acks.keys().next().value!);
+  for(const fn of this.ackListeners)fn(id,best);
+ }
+ /** Starts watching before the send so a fast confirmation is not missed. */
+ watch(p:any){
+  const seen:Outgoing[]=[];let wake=()=>{};
+  const onMessage=(m:Outgoing)=>{if(sameMessage(p,m)){seen.push(m);wake();}};
+  this.listeners.add(onMessage);
+  const wait=(ms:number,done:()=>boolean)=>new Promise<void>(resolve=>{
+   if(done())return resolve();
+   const timer=setTimeout(finish,ms);function finish(){clearTimeout(timer);wake=()=>{};resolve();}
+   wake=()=>{if(done())finish();};
+  });
+  return {
+   message:async(id:string|undefined,ms:number)=>{
+    const find=()=>id?seen.find(m=>m.id===id)??(seen.length===1?seen[0]:undefined):seen[0];
+    await wait(ms,()=>!!find());return find();
+   },
+   ack:async(id:string,ms:number)=>{
+    const current=()=>this.acks.get(id);
+    const onAck=(ackId:string)=>{if(ackId===id)wake();};
+    this.ackListeners.add(onAck);
+    try{await wait(ms,()=>{const a=current();return a!==undefined&&(a<0||a>=1);});}finally{this.ackListeners.delete(onAck);}
+    return current()??0;
+   },
+   close:()=>{this.listeners.delete(onMessage);},
+  };
+ }
+}
 export interface WaClient {
  sendInteractive(to:string,content:InteractiveContent):Promise<string>;
  onInteractiveResponse(fn:(response:InteractiveResponse)=>void):Promise<unknown>;
@@ -17,6 +94,10 @@ export interface WaClient {
  sendText(to:string,text:string):Promise<string>;sendFile(to:string,data:string,name:string,caption:string):Promise<string|boolean>;
  sendPoll(to:string,question:string,options:string[]):Promise<string|boolean>;
  decryptMedia(message:any):Promise<string>;logout(preserve?:boolean):Promise<boolean>;kill():Promise<unknown>;
+ /** 200 has WhatsApp, 404 has not, null unknown. */
+ checkNumber?(to:string):Promise<number|null>;
+ /** Current acknowledgement of a sent message: -1 error, 0 waiting, 1 server, 2 delivered, 3 read; null not found. */
+ messageAck?(id:string):Promise<number|null>;
 }
 // Only this adapter depends on OpenWAUnlocked's lifecycle and method names.
 export class OpenWaAdapter {
@@ -51,7 +132,11 @@ export class OpenWaAdapter {
   try{await raw.start();}
   catch(error){await raw.stop('eulab-start-failed').catch(()=>undefined);throw error;}
   finally{core.events.off('launch.auth.qr.generated',qrListener);core.events.off('launch.auth.linkCode.generated',codeListener);this.pending.delete(sessionId);}
-  return {
+  // One provider subscription, shared by the archive and by send verification.
+  const tracker=new SendTracker(),messageListeners=new Set<(m:any)=>void>(),ackListeners=new Set<(a:any)=>void>();
+  await raw.onAnyMessage((m:any)=>{tracker.message(m);for(const fn of messageListeners)fn(m);});
+  await raw.onAck((a:any)=>{tracker.ack(a);for(const fn of ackListeners)fn(a);});
+  const client:WaClient={
    sendInteractive:(to,content)=>raw.sendInteractive(to,content),
    onInteractiveResponse:async fn=>raw.onInteractiveResponse(fn),
    onIncomingCall:async fn=>raw.onIncomingCall(fn),onCallState:async fn=>raw.onCallState(fn),
@@ -73,27 +158,34 @@ export class OpenWaAdapter {
    },
    getHostNumber:()=>raw.getHostNumber(),getAllChats:()=>raw.evaluate(readChatIds,undefined),
    getAllMessagesInChat:(id,includeMe,notifications)=>raw.getAllMessages(id,includeMe,notifications),
-   onAnyMessage:async fn=>raw.onAnyMessage(fn),onStateChanged:async fn=>raw.onStateChanged(fn),onAck:async fn=>raw.onAck(fn),
+   onAnyMessage:async fn=>{messageListeners.add(fn);},onStateChanged:async fn=>raw.onStateChanged(fn),onAck:async fn=>{ackListeners.add(fn);},
    sendText:(to,text)=>raw.sendText(to,text),sendFile:(to,data,name,caption)=>raw.sendFile(to,data,name,{caption}),
    sendPoll:(to,question,options)=>raw.sendPoll(to,question,options),decryptMedia:message=>raw.decryptMedia(message),
+   checkNumber:async to=>{const r=await raw.checkNumberStatus(to);return r?.status===404?404:r?.numberExists===true||r?.status===200?200:null;},
+   messageAck:async id=>{const m=await raw.getMessageById(id);return m&&typeof m.ack==='number'?m.ack:null;},
    // Logout uses the public evaluate API. Failure remains unconfirmed in audit.
    logout:async()=>await raw.evaluate(()=>{const api=(globalThis as any).WAPI;if(typeof api?.logout!=='function')throw new Error('LOGOUT_NOT_SUPPORTED');return api.logout();},undefined)===true,
    kill:()=>raw.stop('eulab-stop')
   };
+  this.trackers.set(client,tracker);
+  return client;
  }
+ private readonly trackers=new WeakMap<WaClient,SendTracker>();
+ /** How long the phone has to show the outgoing message, and WhatsApp to accept it (ack 1). */
+ static verify={afterResultMs:30_000,afterErrorMs:20_000,ackMs:60_000};
  async cancelPending(id?:string){if(id){await this.pending.get(id)?.();return;}await Promise.allSettled([...this.pending.values()].map(stop=>stop()));}
  profile(id:string){if(!/^[a-f0-9-]{36}$/.test(id))throw new Error('ID sessione non valido');return path.join(required('OPENWA_PROFILE_DIR'),id);}
  async removeAuthentication(id:string){await rm(this.profile(id),{recursive:true,force:true});}
  /** One send at a time per WhatsApp number: media confirmations are matched by file size, so parallel sends of the same photo steal each other's confirmation. */
  private sending=new WeakMap<WaClient,Promise<unknown>>();
- static sendTimeoutMs=90_000;
+ static sendTimeoutMs=150_000;
  send(client:WaClient,p:any):Promise<string>{
   const previous=this.sending.get(client)??Promise.resolve();
   const run=previous.catch(()=>undefined).then(()=>{
    let timer:NodeJS.Timeout|undefined;
    // A confirmation that never comes must not hold the line for the next messages.
    const timeout=new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('PROVIDER_TIMEOUT')),OpenWaAdapter.sendTimeoutMs);});
-   return Promise.race([this.sendNow(client,p),timeout]).finally(()=>clearTimeout(timer));
+   return Promise.race([this.deliver(client,p),timeout]).finally(()=>clearTimeout(timer));
   });
   this.sending.set(client,run.catch(()=>undefined));
   return run;
@@ -108,4 +200,39 @@ export class OpenWaAdapter {
   if(result===false)throw new ProviderRejected('PROVIDER_REJECTED');
   if(typeof result!=='string'||!result||result.startsWith('ERROR'))throw new Error('PROVIDER_RESULT_UNCONFIRMED');return result;
  }
+ /**
+  * Sent only when the phone shows the outgoing message and WhatsApp acknowledges it.
+  * No message on the phone: NotSent (retry is safe). Message without acknowledgement: Unconfirmed.
+  */
+ private async deliver(client:WaClient,p:any):Promise<string>{
+  const tracker=this.trackers.get(client);
+  if(!tracker||p.kind==='interactive')return this.sendNow(client,p);
+  if(String(p.to).endsWith('@c.us')&&client.checkNumber){
+   const status=await this.numberStatus(client,String(p.to));
+   if(status===404)throw new NotOnWhatsApp('NOT_ON_WHATSAPP');
+  }
+  const watch=tracker.watch(p),limits=OpenWaAdapter.verify;
+  try{
+   let id:string|undefined,failure:unknown;
+   try{id=await this.sendNow(client,p);}
+   catch(error){if(error instanceof ProviderRejected)throw error;failure=error;}
+   const seen=await watch.message(id,failure?limits.afterErrorMs:limits.afterResultMs);
+   const messageId=seen?.id??id;
+   if(!messageId)throw new NotSent(providerReason(failure)==='PROVIDER_RESULT_UNCONFIRMED'?'NOT_ON_PHONE':providerReason(failure));
+   const ack=await watch.ack(messageId,limits.ackMs);
+   if(ack>=1)return messageId;
+   if(ack<0)throw new NotSent('WHATSAPP_ACK_ERROR');
+   throw new Unconfirmed(seen?'WHATSAPP_NO_ACK':'NOT_ON_PHONE_NO_ACK',messageId);
+  }finally{watch.close();}
+ }
+ private readonly numbers=new Map<string,{status:number;at:number}>();
+ /** A lookup error never blocks a send: only an explicit 404 does. Results are kept for a day. */
+ private async numberStatus(client:WaClient,to:string){
+  const known=this.numbers.get(to);if(known&&Date.now()-known.at<86_400_000)return known.status;
+  const status=await client.checkNumber!(to).catch(()=>null);
+  if(status){this.numbers.set(to,{status,at:Date.now()});if(this.numbers.size>20_000)this.numbers.delete(this.numbers.keys().next().value!);}
+  return status;
+ }
+ /** Acknowledgement read again later, for a message on the phone that WhatsApp had not confirmed yet. */
+ async ackOf(client:WaClient,id:string){return client.messageAck?client.messageAck(id).catch(()=>null):null;}
 }

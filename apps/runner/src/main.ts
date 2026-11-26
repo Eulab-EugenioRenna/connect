@@ -1,7 +1,7 @@
 import {AutomationService} from '../../api/src/automation.service.js';
 import {IdentitiesService} from '../../api/src/identities.service.js';
 import {recordMessage} from './message-record.js';
-import {runOutbox,recoverInterruptedOutbox} from './outbox.js';
+import {runOutbox,recoverInterruptedOutbox,reconcileOutbox} from './outbox.js';
 import {runProviderOperation} from './provider-operation.js';
 import 'reflect-metadata';
 import {WhatsAppBotService} from '../../api/src/whatsapp-bot.service.js';
@@ -121,6 +121,7 @@ const hookWorker=new Worker('webhooks',async job=>{
  await db.query("UPDATE deliveries SET attempts=attempts+1,last_status=$2,last_error=$3,state=$4,next_attempt_at=now()+interval '30 seconds' WHERE id=$1",[d.id,status,error,error?(d.attempts+1>=8?'failed':'retrying'):'delivered']);
  if(error)throw new Error(error);
 },{connection:redisOptions(),concurrency:4});
+let reconcileTicks=0;
 async function tick(){if(ticking||stopping)return;ticking=true;try{
  await db.query('INSERT INTO runners(id,capacity) VALUES($1,$2) ON CONFLICT(id) DO UPDATE SET heartbeat_at=now(),capacity=$2',[runner,capacity]);
  for(const s of await db.query('SELECT * FROM wa_sessions WHERE runner_id=$1 AND closed_at IS NULL',[runner])){
@@ -132,7 +133,9 @@ async function tick(){if(ticking||stopping)return;ticking=true;try{
    if(starting.has(s.id)||clients.has(s.id))continue;
    await db.transaction(async tx=>{await tx.query('SELECT id FROM installations WHERE id=$1 FOR UPDATE',[s.installation_id]);if(await purgeWhatsApp(tx,s.installation_id,s.archive_id,s.id))await audit(tx,'runner:'+runner,'whatsapp.history.deleted',s.archive_id||s.id);});
  }
- for(const o of await db.query("SELECT o.id FROM outbox o JOIN wa_sessions s ON s.id=o.session_id WHERE s.runner_id=$1 AND o.state='queued'",[runner]))await queue.add('send',{id:o.id},{jobId:o.id,attempts:20,backoff:{type:'exponential',delay:2000},removeOnComplete:true,removeOnFail:100});
+ for(const o of await db.query("SELECT o.id FROM outbox o JOIN wa_sessions s ON s.id=o.session_id WHERE s.runner_id=$1 AND o.state='queued' AND (o.not_before IS NULL OR o.not_before<=now())",[runner]))await queue.add('send',{id:o.id},{jobId:o.id,attempts:20,backoff:{type:'exponential',delay:2000},removeOnComplete:true,removeOnFail:100});
+ // About once a minute: messages waiting for WhatsApp's acknowledgement are checked again.
+ if(++reconcileTicks%12===0)await reconcileOutbox(db,runner,async(sessionId,providerId)=>{const owner=leases.get(sessionId),client=clients.get(sessionId);return owner&&client&&await redis.get(`owner:${sessionId}`)===owner?adapter.ackOf(client,providerId):null;}).catch(()=>console.error('Verifica esiti non disponibile'));
  for(const op of await db.query("SELECT o.id FROM wa_operations o JOIN wa_sessions s ON s.id=o.session_id WHERE s.runner_id=$1 AND o.state='queued'",[runner]))await queue.add('provider-operation',{id:op.id},{jobId:`operation-${op.id}`,attempts:10,backoff:{type:'exponential',delay:2000},removeOnComplete:true,removeOnFail:100});
  for(const d of await db.query("SELECT id FROM deliveries WHERE state IN ('queued','retrying') AND attempts<8 AND next_attempt_at<=now()"))await hooks.add('deliver',{id:d.id},{jobId:d.id,attempts:8,backoff:{type:'exponential',delay:2000},removeOnComplete:100,removeOnFail:200});
  }finally{ticking=false;}}
