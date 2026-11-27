@@ -4,6 +4,8 @@ import {createDecipheriv,createHmac,hkdfSync,timingSafeEqual} from 'node:crypto'
 import path from 'node:path';
 import {required} from '../../api/src/config.js';
 import {readChatIds} from './openwa-history.js';
+import {openChatInPage} from './openwa-page.js';
+export {openChatInPage};
 /** The provider said no before sending anything: the message did not leave. */
 export class ProviderRejected extends Error {}
 /** Verified on the phone: no outgoing message appeared. Safe to try again. */
@@ -75,25 +77,6 @@ export async function mediaSource(message:any,byId:(id:string)=>Promise<any>){
  * Tries the current WhatsApp module (findOrCreateLatestChat, which may answer with a
  * private «@lid» chat) and then the older Store.Chat.find.
  */
-export async function openChatInPage(to:string):Promise<{state:'exists'|'opened'|'missing'|'unsupported';chatId:string|null;via:string}>{
- const root=globalThis as any,chats=root.Store?.Chat;
- const idOf=(chat:any)=>typeof chat?.id==='string'?chat.id:typeof chat?.id?._serialized==='string'?chat.id._serialized:null;
- if(chats&&typeof chats.get==='function'){const found=chats.get(to);if(found)return {state:'exists',chatId:idOf(found)??to,via:'store'};}
- const need=typeof root.require==='function'?(name:string)=>{try{return root.require(name);}catch{return null;}}:()=>null;
- const widFactory=need('WAWebWidFactory'),finder=need('WAWebFindChatAction');
- if(widFactory?.createWid&&finder?.findOrCreateLatestChat){
-  try{
-   const result=await finder.findOrCreateLatestChat(widFactory.createWid(to));
-   const chatId=idOf(result?.chat??result);
-   if(chatId)return {state:'opened',chatId,via:'findOrCreateLatestChat'};
-  }catch{ /* older WhatsApp Web: try the Store below */ }
- }
- if(chats&&typeof chats.find==='function'){
-  try{const chat=await chats.find(to);const chatId=idOf(chat)??idOf(chats.get(to));if(chatId)return {state:'opened',chatId,via:'store.find'};}catch{ /* below */ }
-  return {state:'missing',chatId:null,via:'store.find'};
- }
- return {state:chats?'missing':'unsupported',chatId:null,via:'none'};
-}
 interface Outgoing {id:string;type:string;body:string;caption:string;to:string;ack:number|undefined}
 const serialized=(value:any):string=>typeof value==='string'?value:typeof value?._serialized==='string'?value._serialized:'';
 function outgoing(m:any):Outgoing|undefined{
@@ -288,7 +271,7 @@ export class OpenWaAdapter {
   }
   // «Start a chat with sendText … before trying to send media»: open the chat first, no extra message.
   if(mediaTypes[p.kind]&&client.openChat){
-   const opened=await client.openChat(String(p.to)).catch(()=>({state:'missing' as const,chatId:null,via:'error'}));
+   const opened=await client.openChat(String(p.to)).catch((error:unknown)=>({state:'missing' as const,chatId:null,via:'error:'+String((error as any)?.message??error).slice(0,120)}));
    if(opened.state!=='exists')console.warn(JSON.stringify({component:'outbox',level:'info',message:'media_chat_opened',result:opened.state,via:opened.via,lid:!!opened.chatId?.endsWith('@lid')}));
    // The chat may live under its private «@lid» id: the media goes there.
    if(opened.chatId&&opened.chatId!==p.to)p={...p,to:opened.chatId};

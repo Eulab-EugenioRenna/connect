@@ -209,3 +209,17 @@ test('Allegati: decifratura WhatsApp con verifica e rimozione della firma (MAC)'
  const tampered=Buffer.from(file);tampered[3]^=1;
  assert.throws(()=>decryptMediaBytes(tampered,mediaKey.toString('base64'),'image'),/MEDIA_MAC_MISMATCH/);
 });
+
+test('Apertura chat: la funzione compilata come in produzione gira nella pagina senza helper esterni',async()=>{
+ const {build}=await import('esbuild');
+ const out=await build({entryPoints:['apps/runner/src/openwa-page.ts'],bundle:true,write:false,platform:'node',format:'esm',target:'node22',keepNames:true,minifyWhitespace:true,minifySyntax:true});
+ const code=out.outputFiles[0].text,start=code.indexOf('async function openChatInPage');
+ assert.ok(start>=0);
+ // Only the function source reaches WhatsApp Web, as puppeteer evaluate does.
+ let depth=0,end=code.indexOf('{',start);for(let i=end;i<code.length;i++){if(code[i]==='{')depth++;else if(code[i]==='}'&&--depth===0){end=i+1;break;}}
+ const inPage=new Function(`return (${code.slice(start,end)})`)();
+ const root=globalThis as any,previous=root.Store;
+ root.Store={Chat:{get:()=>undefined,find:async(id:string)=>({id:{_serialized:id}})}};
+ try{assert.deepEqual(await inPage('393331234567@c.us'),{state:'opened',chatId:'393331234567@c.us',via:'store.find'});}
+ finally{if(previous===undefined)delete root.Store;else root.Store=previous;}
+});
