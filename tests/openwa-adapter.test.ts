@@ -18,9 +18,9 @@ async function fixture(run:(context:any)=>Promise<void>){
  const phone:any={appear:true,ack:1,onMessage:()=>{},onAck:()=>{},count:0,
   echo(type:string,to:string,extra:any){
    if(!phone.appear)return;const id=typeof result==='string'&&result.startsWith('true_')?result:`true_${to}_m${++phone.count}`;
-   setTimeout(()=>{phone.onMessage({id,fromMe:true,type,to,ack:0,...extra});if(phone.ack!==null)setTimeout(()=>phone.onAck({id,ack:phone.ack,fromMe:true}),1);},1);
+   setTimeout(()=>{phone.onMessage({id,fromMe:true,type,to,ack:0,...extra});if(phone.ack!==null)setTimeout(()=>phone.onAck({id:phone.shortAck?id.slice(id.lastIndexOf('_')+1):id,ack:phone.ack,fromMe:true}),1);},1);
   }};
- class Driver {}
+ class Driver {async launch(options:any){return options;}}
  class Client {
   constructor(options:any){assert.equal(options.transport,'transport');}
   async start(){
@@ -65,6 +65,18 @@ test('OpenWAUnlocked: crea il client, converte il QR e conserva i vecchi profili
  assert.equal(config().userDataDir,undefined);assert.equal(config().licenseKey,undefined);
  assert.equal(events.listenerCount('launch.auth.qr.generated'),0);
  assert.equal(await readFile(old,'utf8'),'preserved');
+}));
+
+test('OpenWAUnlocked: il profilo Chrome con il login WhatsApp sta sul volume e sopravvive al riavvio',async()=>fixture(async({adapter,directory,config})=>{
+ const chrome=path.join(directory,sessionId,'chrome');await mkdir(chrome,{recursive:true});
+ await writeFile(path.join(chrome,'SingletonLock'),'old-container');await writeFile(path.join(chrome,'Local State'),'login');
+ await adapter.create(sessionId,async()=>{});
+ const launched=await config().driver.launch({headless:true,args:['--x']});
+ assert.equal(launched.userDataDir,chrome);assert.deepEqual(launched.args,['--x']);
+ await assert.rejects(readFile(path.join(chrome,'SingletonLock')),/ENOENT/);
+ assert.equal(await readFile(path.join(chrome,'Local State'),'utf8'),'login');
+ await adapter.removeAuthentication(sessionId);
+ await assert.rejects(readFile(path.join(chrome,'Local State')),/ENOENT/);
 }));
 
 test('OpenWAUnlocked: un avvio fallito chiude il client e rimuove listener e avvio pendente',async()=>fixture(async({adapter,setError,events,stops})=>{
@@ -135,6 +147,14 @@ test('Invio verificato: conta il messaggio visto sul telefono e accettato da Wha
  // WhatsApp error on the message: not delivered, retry allowed.
  phone.ack=-1;setResult('true_393331234567@c.us_err');
  await assert.rejects(adapter.send(client,{kind:'text',to:'393331234567@c.us',text:'Ciao'}),NotSent);
+}));
+
+test('Invio verificato: la conferma di WhatsApp Web porta solo la chiave del messaggio (anche in chat @lid)',async()=>fixture(async({adapter,phone,setResult})=>{
+ const client=await adapter.create(sessionId,async()=>{});
+ phone.shortAck=true;phone.ack=2;setResult('true_157325323190291@lid_3EB049178BFE263F1E5B40');
+ assert.equal(await adapter.send(client,{kind:'text',to:'393331234567@c.us',text:'Ciao'}),'true_157325323190291@lid_3EB049178BFE263F1E5B40');
+ phone.ack=-1;setResult('true_157325323190291@lid_3EB0AAAA');
+ await assert.rejects(adapter.send(client,{kind:'text',to:'393331234567@c.us',text:'Ancora'}),NotSent);
 }));
 
 test('Invio verificato: un messaggio uscito verso un altro numero non conferma il nostro',async()=>fixture(async({adapter,phone,setResult})=>{
