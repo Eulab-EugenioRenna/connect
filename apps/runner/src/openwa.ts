@@ -100,6 +100,11 @@ function sameMessage(p:any,m:Outgoing){
  * Outgoing messages and acknowledgements seen on the phone. A send is verified against these,
  * not against the return value of the browser function, which can fail after sending or succeed without sending.
  */
+/**
+ * WhatsApp Web reports acknowledgements with the bare message key («3EB0…»), while sends and
+ * outgoing messages carry the full id («true_<chat>@lid_3EB0…»). Both are matched on the key.
+ */
+export const messageKey=(id:string)=>id.slice(id.lastIndexOf('_')+1);
 export class SendTracker {
  private readonly acks=new Map<string,number>();
  private readonly listeners=new Set<(m:Outgoing)=>void>();
@@ -107,7 +112,7 @@ export class SendTracker {
  message(raw:any){const m=outgoing(raw);if(!m)return;if(m.ack!==undefined)this.ack({id:m.id,ack:m.ack,fromMe:true});for(const fn of this.listeners)fn(m);}
  ack(raw:any){
   const id=serialized(raw?.id),ack=raw?.ack;if(!id||typeof ack!=='number')return;
-  const best=ack<0?ack:Math.max(ack,this.acks.get(id)??ack);this.acks.set(id,best);
+  const key=messageKey(id),best=ack<0?ack:Math.max(ack,this.acks.get(key)??ack);this.acks.set(key,best);
   if(this.acks.size>2000)this.acks.delete(this.acks.keys().next().value!);
   for(const fn of this.ackListeners)fn(id,best);
  }
@@ -127,8 +132,8 @@ export class SendTracker {
     await wait(ms,()=>!!find());return find();
    },
    ack:async(id:string,ms:number)=>{
-    const current=()=>this.acks.get(id);
-    const onAck=(ackId:string)=>{if(ackId===id)wake();};
+    const current=()=>this.acks.get(messageKey(id));
+    const onAck=(ackId:string)=>{if(messageKey(ackId)===messageKey(id))wake();};
     this.ackListeners.add(onAck);
     try{await wait(ms,()=>{const a=current();return a!==undefined&&(a<0||a>=1);});}finally{this.ackListeners.delete(onAck);}
     return current()??0;
@@ -167,7 +172,7 @@ export class OpenWaAdapter {
  async create(sessionId:string,onQR:(qr:string)=>Promise<void>,link?:{phone:string;onLinkCode:(code:string)=>Promise<void>}):Promise<WaClient>{
   const [wa,clientModule,driverModule,qrModule]=await this.loadProvider();
   const profile=path.join(this.profile(sessionId),'openwaunlocked');await mkdir(profile,{recursive:true,mode:0o700});
-  const core=await wa.createClient({sessionId,driver:new driverModule.PuppeteerDriver(),sessionDataPath:profile,
+  const core=await wa.createClient({sessionId,driver:await this.persistentDriver(driverModule.PuppeteerDriver,sessionId),sessionDataPath:profile,
    sessionDataEncryptionKey:Buffer.from(required('DATA_ENCRYPTION_KEY'),'hex').toString('base64'),headless:true,executablePath:process.env.CHROMIUM_PATH,
    browserArgs:['--no-sandbox','--disable-dev-shm-usage'],allowDangerousBrowserArgs:true,
    qrTimeoutMs:180000,authTimeoutMs:180000,navigationTimeoutMs:60000,
@@ -234,6 +239,19 @@ export class OpenWaAdapter {
  async cancelPending(id?:string){if(id){await this.pending.get(id)?.();return;}await Promise.allSettled([...this.pending.values()].map(stop=>stop()));}
  profile(id:string){if(!/^[a-f0-9-]{36}$/.test(id))throw new Error('ID sessione non valido');return path.join(required('OPENWA_PROFILE_DIR'),id);}
  async removeAuthentication(id:string){await rm(this.profile(id),{recursive:true,force:true});}
+ /**
+  * Chrome keeps WhatsApp Web's login (IndexedDB) in its profile. OpenWAUnlocked launches a
+  * throwaway profile inside the container and its own checkpoint is never written, so every
+  * runner restart or new image asked for a new QR. The profile lives on the /profiles volume
+  * instead: it survives restarts and image changes, and removeAuthentication still wipes it.
+  * Chrome's single-instance locks left by a killed container would block the next launch.
+  */
+ chromeProfile(id:string){return path.join(this.profile(id),'chrome');}
+ protected async persistentDriver(Base:new()=>any,sessionId:string){
+  const dir=this.chromeProfile(sessionId);await mkdir(dir,{recursive:true,mode:0o700});
+  await Promise.all(['SingletonLock','SingletonSocket','SingletonCookie'].map(name=>rm(path.join(dir,name),{force:true})));
+  return new (class extends Base{launch(options?:any){return super.launch({...options,userDataDir:options?.userDataDir??dir});}})();
+ }
  /** One send at a time per WhatsApp number: media confirmations are matched by file size, so parallel sends of the same photo steal each other's confirmation. */
  private sending=new WeakMap<WaClient,Promise<unknown>>();
  static sendTimeoutMs=150_000;
